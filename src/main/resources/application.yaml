@@ -1,0 +1,3 @@
+spring:
+  application:
+    name: Zip_Project_Parser_Backend
