@@ -11,12 +11,15 @@ import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.BodyDeclaration;
+import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
+import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
-import com.github.javaparser.ast.stmt.BlockStmt;
+import com.github.javaparser.ast.stmt.ForEachStmt;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
+import com.github.javaparser.ast.type.PrimitiveType;
 import com.github.javaparser.ast.type.Type;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -60,11 +63,14 @@ public class ZipParser {
 
         Map<String, List<ClassDetailsResponse>> returnMap = new HashMap<>();
         Map<String, List<ImportResponse>> importsByPath = new HashMap<>();
+        Map<String, List<ImportResponse>> importsByQualifiedName = new HashMap<>();
+        Map<String, List<CallSite>> methodCalls = new HashMap<>();
         List<EndpointResponse> endpointResponseList = new ArrayList<>();
         List<MethodCallResponse> methodCallResponseList = new ArrayList<>();
         var path = "";
         for (var entry : map.entrySet()) {
             List<ClassDetailsResponse> classDetailsResponses = new ArrayList<>();
+            List<CallSite> methodCallsResponses = new ArrayList<>();
             var classCode = entry.getValue();
             path = entry.getKey();
 
@@ -133,8 +139,10 @@ public class ZipParser {
                     declaringTypeName = packageName + "." + className;
                 }
                 endpointResponseList.addAll(extractEndpoints(type, declaringTypeName));
-                methodCallResponseList.addAll(extractMethodCalls(type, declaringTypeName));
+                methodCallsResponses.addAll(extractMethodCalls(type, declaringTypeName));
+                importsByQualifiedName.put(declaringTypeName, imports);
             }
+            methodCalls.put(path, methodCallsResponses);
             returnMap.put(path, classDetailsResponses);
         }
         var typesByQualifiedName = mapTypesByQualifiedName(returnMap);
@@ -147,6 +155,14 @@ public class ZipParser {
             var key = returnedMap.getKey();
             var imports = importsByPath.get(key);
             var sourceTypes = returnedMap.getValue();
+            var calls = methodCalls.get(key);
+            IdentityHashMap<MethodCallExpr, CallSite> sitesByExpr = new IdentityHashMap<>();
+            IdentityHashMap<MethodCallExpr, MethodCallResponse> resolvedByExpr = new IdentityHashMap<>();
+
+            for (var call : calls) {
+                sitesByExpr.put(call.methodCallExpr(), call);
+            }
+
             for (var sourceType : sourceTypes) {
                 String sourceTypeName;
                 if (sourceType.packageName() == null || sourceType.packageName().isEmpty()) {
@@ -166,18 +182,24 @@ public class ZipParser {
                 var resolvedInheritanceDependencies = resolveInheritanceDependencies(sourceType, imports, typesByQualifiedName, sourceTypeName);
                 inheritanceDependencyResponseList.addAll(resolvedInheritanceDependencies);
 
-
+                for (var call : calls) {
+                    var callRsp = call.methodCallResponse();
+                    if (callRsp.sourceType().equals(sourceTypeName)) {
+                        methodCallResponseList.add(
+                                resolveCall(call, sourceTypeName, sourceType.packageName(),
+                                        imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName));
+                    }
+                }
             }
         }
 
         var typeNamesByPackage = groupTypeNamesByPackage(returnMap);
-        var packageTree = buildPackageTree(typeNamesByPackage);
 
+        var packageTree = buildPackageTree(typeNamesByPackage);
         return new ProjectAnalysisResponse(returnMap, typeNamesByPackage, packageTree, endpointResponseList,
                 methodCallResponseList, fieldDependencyResponseList, methodDependencyResponseList,
                 constructorDependencyResponseList, inheritanceDependencyResponseList);
     }
-
 
     private List<MethodResponse> extractMethods(TypeDeclaration<?> type) {
 
@@ -211,6 +233,117 @@ public class ZipParser {
                     methodAnnotations, parameters, methodReferencedType));
         }
 
+        if (type.isRecordDeclaration()) {
+            var recordDeclaration = type.asRecordDeclaration();
+
+            for (var field : recordDeclaration.getParameters()) {
+
+                if (methodResponses.stream().anyMatch(i ->
+                        i.name().equals(field.getNameAsString()) && i.parameters().isEmpty())) {
+                    continue;
+                }
+                var annotations = field.getAnnotations().stream()
+                        .map(Node::toString).toList();
+                var referencedTypes = extractReferencedTypes(field.getType());
+
+                methodResponses.add(new MethodResponse(
+                        field.getNameAsString(), field.getNameAsString() + "()",
+                        field.getTypeAsString(), annotations, List.of(),referencedTypes));
+            }
+        }
+
+        if (type.isAnnotationPresent("Data") || type.isAnnotationPresent("Getter") || type.isAnnotationPresent("Value")) {
+            for (var field : type.getFields()) {
+                if (field.isStatic()) continue;
+
+                for (var variable : field.getVariables()) {
+                    var varType = variable.getType();
+                    var name = variable.getName().asString();
+                    var firstUpperLetter = name.substring(0,1).toUpperCase();
+                    var restLetters = name.substring(1);
+                    var prefix = "get";
+                    String getterName;
+                    if (varType.isPrimitiveType() &&
+                    varType.asPrimitiveType().getType().equals(PrimitiveType.Primitive.BOOLEAN)) {
+                        if (name.startsWith("is") && name.length() > 2 && Character.isUpperCase(name.charAt(2))) {
+                            getterName = name;
+                        } else {
+                            prefix = "is";
+                            getterName = prefix + firstUpperLetter + restLetters;
+                        }
+                    } else {
+                        getterName = prefix + firstUpperLetter + restLetters;
+                    }
+
+                    if (methodResponses.stream().anyMatch(i ->
+                            i.name().equals(getterName) && i.parameters().isEmpty())) {
+                        continue;
+                    }
+
+                    methodResponses.add(new MethodResponse(
+                            getterName, getterName + "()",
+                            variable.getTypeAsString(), List.of(), List.of(),List.of()));
+                }
+            }
+        }
+
+        if (type.isAnnotationPresent("Data") || type.isAnnotationPresent("Setter") ) {
+            for (var field : type.getFields()) {
+                if (field.isStatic() || field.isFinal()) continue;
+
+                for (var variable : field.getVariables()) {
+                    var varType = variable.getType();
+                    var name = variable.getName().asString();
+                    var firstUpperLetter = name.substring(0,1).toUpperCase();
+                    var restLetters = name.substring(1);
+                    String setterName;
+                    if (varType.isPrimitiveType() &&
+                            varType.asPrimitiveType().getType().equals(PrimitiveType.Primitive.BOOLEAN) &&
+                            name.startsWith("is") && name.length() > 2
+                            && Character.isUpperCase(name.charAt(2))) {
+
+                            setterName = "set" + name.substring(2);
+                    } else {
+                        setterName = "set" + firstUpperLetter + restLetters;
+                    }
+
+                    if (methodResponses.stream().anyMatch(i ->
+                            i.name().equals(setterName) && i.parameters().size() == 1)) {
+                        continue;
+                    }
+
+                    var typeForSignature = varType.isClassOrInterfaceType() ?
+                            varType.asClassOrInterfaceType().getNameWithScope() : varType.asString();
+                    methodResponses.add(new MethodResponse(
+                            setterName, setterName + "(" + typeForSignature + ")",
+                            "void", List.of(),
+                            List.of(new ParameterResponse(name, varType.asString(), List.of(), List.of())),
+                            List.of()));
+                }
+            }
+        }
+        //
+        var repoNames = Set.of("JpaRepository", "CrudRepository", "ListCrudRepository", "PagingAndSortingRepository");
+        if (type.isClassOrInterfaceDeclaration() && type.asClassOrInterfaceDeclaration().isInterface()) {
+            var typeArgs = type.asClassOrInterfaceDeclaration()
+                    .getExtendedTypes()
+                    .stream()
+                    .filter(i-> repoNames.contains(i.getNameAsString()))
+                    .findFirst().flatMap(ClassOrInterfaceType::getTypeArguments);
+            if (typeArgs.isPresent() && typeArgs.get().size() == 2) {
+                var entity = typeArgs.get().get(0).asString();
+                var id = typeArgs.get().get(1).asString();
+
+                addIfMissing(methodResponses, generatedMethod("save", entity, "entity",entity));
+                addIfMissing(methodResponses, generatedMethod("saveAndFlush", entity, "entity", entity));
+                addIfMissing(methodResponses, generatedMethod("delete", "void", "entity", entity));
+                addIfMissing(methodResponses, generatedMethod("findById", "Optional<"+entity+">", "id", id));
+                addIfMissing(methodResponses, generatedMethod("findAll", "List<"+entity+">", null, null));
+                addIfMissing(methodResponses, generatedMethod("existsById", "boolean", "id", id));
+                addIfMissing(methodResponses, generatedMethod("deleteById", "void", "id", id));
+                addIfMissing(methodResponses, generatedMethod("count", "long", null, null));
+            }
+        }
         return methodResponses;
     }
 
@@ -295,7 +428,6 @@ public class ZipParser {
                         ext.toString(), ext.getNameAsString(), extractReferencedTypes(ext))
                 );
             }
-
             var implemented = inheritanceDeclaration.getImplementedTypes()
                     .stream()
                     .toList();
@@ -315,7 +447,6 @@ public class ZipParser {
                 implementedTypes.add(new InheritanceTypeResponse(
                         impl.toString(), impl.getNameAsString(),extractReferencedTypes(impl)));
             }
-
         }
         if (type.isEnumDeclaration()) {
             var inheritanceDeclaration = type.asEnumDeclaration();
@@ -327,12 +458,9 @@ public class ZipParser {
                 implementedTypes.add(new InheritanceTypeResponse(
                         impl.toString(), impl.getNameAsString(),extractReferencedTypes(impl)));
             }
-
         }
-
         return new InheritanceResponse(extendedTypes, implementedTypes);
     }
-
 
     private List<ImportResponse> extractImports(CompilationUnit compilationUnit) {
         List<ImportResponse> importResponses = new ArrayList<>();
@@ -347,7 +475,6 @@ public class ZipParser {
         }
         return importResponses;
     }
-
 
     private Map<String, ClassDetailsResponse> mapTypesByQualifiedName(Map<String, List<ClassDetailsResponse>> map) {
         Map<String, ClassDetailsResponse> returnMap = new HashMap<>();
@@ -383,7 +510,6 @@ public class ZipParser {
         }
         return returnList;
     }
-
 
     private List<String> extractReferencedTypes(Type type) {
         return type.findAll(ClassOrInterfaceType.class)
@@ -429,7 +555,6 @@ public class ZipParser {
         return null;
     }
 
-
     private List<MethodDependencyResponse> resolveMethodDependencies(ClassDetailsResponse sourceType, List<ImportResponse> imports,
                                                                      Map<String, ClassDetailsResponse> typesByQualifiedName,
                                                                      String sourceTypeName) {
@@ -460,7 +585,6 @@ public class ZipParser {
         }
         return returnList;
     }
-
 
     private List<ConstructorDependencyResponse> resolveConstructorDependencies(ClassDetailsResponse sourceType, List<ImportResponse> imports,
                                                                                Map<String, ClassDetailsResponse> typesByQualifiedName,
@@ -501,7 +625,6 @@ public class ZipParser {
         }
         return returnList;
     }
-
 
     private Map<String, List<String>> groupTypeNamesByPackage(Map<String, List<ClassDetailsResponse>> map) {
         Map<String, List<String>> returnMap = new HashMap<>();
@@ -565,7 +688,6 @@ public class ZipParser {
         return packageNodeResponses;
     }
 
-
     private List<EndpointResponse> extractEndpoints(TypeDeclaration<?> type, String declaringTypeName) {
         List<EndpointResponse> returnList = new ArrayList<>();
 
@@ -625,7 +747,6 @@ public class ZipParser {
         return returnList;
     }
 
-
     private List<String> extractMappingPaths(AnnotationExpr annotationExpr) {
         List<String> returnList = new ArrayList<>();
 
@@ -677,7 +798,6 @@ public class ZipParser {
         return returnList;
     }
 
-
     private List<HttpMethodKind> extractHttpMethods(AnnotationExpr annotationExpr) {
         List<HttpMethodKind> returnList = new ArrayList<>();
         switch (annotationExpr.getName().getIdentifier()) {
@@ -698,14 +818,14 @@ public class ZipParser {
                         if (normal.getValue().isFieldAccessExpr()) {
                             var field = normal.getValue().asFieldAccessExpr().getNameAsString();
                             switch (field) {
-                                case "GET": returnList.add(HttpMethodKind.GET);
-                                case "POST": returnList.add(HttpMethodKind.POST);
-                                case "PUT": returnList.add(HttpMethodKind.PUT);
-                                case "PATCH": returnList.add(HttpMethodKind.PATCH);
-                                case "DELETE": returnList.add(HttpMethodKind.DELETE);
-                                case "HEAD": returnList.add(HttpMethodKind.HEAD);
-                                case "OPTIONS": returnList.add(HttpMethodKind.OPTIONS);
-                                case "TRACE": returnList.add(HttpMethodKind.TRACE);
+                                case "GET" -> returnList.add(HttpMethodKind.GET);
+                                case "POST" -> returnList.add(HttpMethodKind.POST);
+                                case "PUT" -> returnList.add(HttpMethodKind.PUT);
+                                case "PATCH" -> returnList.add(HttpMethodKind.PATCH);
+                                case "DELETE" -> returnList.add(HttpMethodKind.DELETE);
+                                case "HEAD" -> returnList.add(HttpMethodKind.HEAD);
+                                case "OPTIONS" -> returnList.add(HttpMethodKind.OPTIONS);
+                                case "TRACE" -> returnList.add(HttpMethodKind.TRACE);
                             }
                         }
 
@@ -716,14 +836,14 @@ public class ZipParser {
                                 if (arrNormal.isFieldAccessExpr()) {
                                     var field = arrNormal.asFieldAccessExpr().getNameAsString();
                                     switch (field) {
-                                        case "GET": returnList.add(HttpMethodKind.GET);
-                                        case "POST": returnList.add(HttpMethodKind.POST);
-                                        case "PUT": returnList.add(HttpMethodKind.PUT);
-                                        case "PATCH": returnList.add(HttpMethodKind.PATCH);
-                                        case "DELETE": returnList.add(HttpMethodKind.DELETE);
-                                        case "HEAD": returnList.add(HttpMethodKind.HEAD);
-                                        case "OPTIONS": returnList.add(HttpMethodKind.OPTIONS);
-                                        case "TRACE": returnList.add(HttpMethodKind.TRACE);
+                                        case "GET" -> returnList.add(HttpMethodKind.GET);
+                                        case "POST" -> returnList.add(HttpMethodKind.POST);
+                                        case "PUT" -> returnList.add(HttpMethodKind.PUT);
+                                        case "PATCH" -> returnList.add(HttpMethodKind.PATCH);
+                                        case "DELETE" -> returnList.add(HttpMethodKind.DELETE);
+                                        case "HEAD" -> returnList.add(HttpMethodKind.HEAD);
+                                        case "OPTIONS" -> returnList.add(HttpMethodKind.OPTIONS);
+                                        case "TRACE" -> returnList.add(HttpMethodKind.TRACE);
                                     }
                                 }
                             }
@@ -739,8 +859,8 @@ public class ZipParser {
 
     }
 
-    private List<MethodCallResponse> extractMethodCalls(TypeDeclaration<?> type, String declaringTypeName) {
-        List<MethodCallResponse> returnList = new ArrayList<>();
+    private List<CallSite> extractMethodCalls(TypeDeclaration<?> type, String declaringTypeName) {
+        List<CallSite> returnList = new ArrayList<>();
         var methods = type.getMethods();
         for (var method : methods) {
             var methodBody = method.getBody();
@@ -750,20 +870,256 @@ public class ZipParser {
             var methodCallExprs = blockStmt.findAll(MethodCallExpr.class);
             for (var methodCall : methodCallExprs) {
                 var calledMethodName = methodCall.getNameAsString();
-                var scope = methodCall.getScope().map(Node::toString).orElse(null);
+                var scope = methodCall.getScope().orElse(null);
+                var respScope = methodCall.getScope().map(Node::toString).orElse(null);
+                String scopeName = null;
+                boolean foundLocal = false;
+                if (scope != null && scope.isNameExpr()) {
+                    scopeName = scope.asNameExpr().getNameAsString();
+                }
+                String scopeTypeName = null;
+                for (var u = 0; u < method.getParameters().size(); u++) {
+                    var declarationParameter = method.getParameter(u);
+                    if (declarationParameter.getNameAsString().equals(scopeName)) {
+                        scopeTypeName = declarationParameter.getType().asString();
+                        break;
+                    }
+                }
 
 
+                if (scopeName != null && scopeTypeName == null) {
+                    var declarators = blockStmt.findAll(VariableDeclarator.class);
+                    for (var decl : declarators) {
+                        if (decl.getNameAsString().equals(scopeName)) {
+                            foundLocal = true;
+                            if (!decl.getTypeAsString().equals("var")) {
+                                scopeTypeName = decl.getTypeAsString();
+                            } else if (decl.getInitializer().isPresent() &&
+                                    decl.getInitializer().get().isObjectCreationExpr()) {
+                                scopeTypeName = decl.getInitializer().get().asObjectCreationExpr().getTypeAsString();
+                            }
+                            break;
+                        }
+                    }
+                }
+                if (scopeName != null && scopeTypeName == null && !foundLocal) {
+                    for (var field : type.getFields()) {
+                        for (var variable : field.getVariables()) {
+                            if (variable.getNameAsString().equals(scopeName)) {
+                                scopeTypeName = variable.getType().asString();
+
+                            }
+                        }
+                    }
+                }
 
                 var argumentCount = methodCall.getArguments().size();
-                returnList.add(new MethodCallResponse(declaringTypeName, method.getSignature().asString(),
-                        calledMethodName, scope, argumentCount));
+                returnList.add(new CallSite(methodCall, new MethodCallResponse(declaringTypeName, method.getSignature().asString(),
+                        calledMethodName, respScope, scopeTypeName,null, null, argumentCount)));
             }
         }
 
         return returnList;
     }
 
+    private MethodCallResponse resolveCall(CallSite call, String sourceTypeName, String packageName,
+                                           List<ImportResponse> imports, Map<String, ClassDetailsResponse> typesByQualifiedName,
+                                           IdentityHashMap<MethodCallExpr, CallSite> sitesByExpr,
+                                           IdentityHashMap<MethodCallExpr, MethodCallResponse> resolvedByExpr,
+                                           Map<String, List<ImportResponse>> importsByQualifiedName) {
+
+        if (resolvedByExpr.containsKey(call.methodCallExpr())) {
+            return resolvedByExpr.get(call.methodCallExpr());
+        }
+
+        var callRsp = call.methodCallResponse();
+        String targetType = null;
+        String methodSignature = null;
+        if (callRsp.scopeType() != null) {
+            targetType = resolveProjectTypeName(callRsp.scopeType(), packageName, imports,typesByQualifiedName);
+        }
+        else if (callRsp.scope() == null || callRsp.scope().equals("this")) {
+            targetType = sourceTypeName;
+        }
+        else if (call.methodCallExpr().getScope().isPresent() && call.methodCallExpr().getScope().get().isMethodCallExpr()) {
+            var innerExp = call.methodCallExpr().getScope().get().asMethodCallExpr();
+            targetType = typeOfCall(innerExp, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+        }
+        else if(call.methodCallExpr().getScope().isPresent() && call.methodCallExpr().getScope().get().isNameExpr()) {
+            var nameExpr = call.methodCallExpr().getScope().get().asNameExpr();
+            var enclosingMethod = nameExpr.findAncestor(MethodDeclaration.class).orElse(null);
+
+            if (enclosingMethod != null) {
+                var declarator = enclosingMethod.findAll(VariableDeclarator.class).stream().filter(i ->
+                        i.getNameAsString().equals(nameExpr.getNameAsString())).findFirst();
+                var initializer = declarator.flatMap(VariableDeclarator::getInitializer);
+                var ancestor = declarator.flatMap(variableDeclarator -> variableDeclarator.findAncestor(ForEachStmt.class));
+
+                if (initializer.isPresent() && initializer.get().isMethodCallExpr()) {
+                    var initCall = initializer.get().asMethodCallExpr();
+                    targetType = typeOfCall(initCall, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+                }
+                else if (declarator.isPresent() && (ancestor.isPresent() && ancestor.get().getVariableDeclarator().equals(declarator.get()))) {
+                    if (ancestor.get().getIterable().isNameExpr()) {
+                        var ancestorName = ancestor.get().getIterable().asNameExpr();
+                        var iterableDeclarator = enclosingMethod.findAll(VariableDeclarator.class).stream().filter(i ->
+                                Objects.equals(i.getNameAsString(), ancestorName.getNameAsString())).findFirst();
+
+                        var iterableInitializer = iterableDeclarator.flatMap(VariableDeclarator::getInitializer);
+                        String elementType = null;
+                        if (iterableInitializer.isPresent() && iterableInitializer.get().isMethodCallExpr()) {
+                            var iterableCall = iterableInitializer.get().asMethodCallExpr();
+                            if (sitesByExpr.containsKey(iterableCall)) {
+                                var foundIterable = sitesByExpr.get(iterableCall);
+                                var resolved = resolveCall(foundIterable, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+                                var returnTypeText = rawReturnType(resolved, typesByQualifiedName);
+                                var type = typeArgument(returnTypeText);
+                                targetType = resolveInClassContext(type, resolved.targetType(), importsByQualifiedName, typesByQualifiedName);
+                            }
+                        }
+                        else if (iterableDeclarator.isPresent() && !iterableDeclarator.get().getTypeAsString().equals("var")) {
+                            elementType = typeArgument(iterableDeclarator.get().getTypeAsString());
+                        }
+                        else if (iterableDeclarator.isEmpty()) {
+                            var parameter = enclosingMethod.getParameterByName(ancestorName.getNameAsString());
+                            if (parameter.isPresent()) {
+                                elementType = typeArgument(parameter.get().getTypeAsString());
+                            }
+                        }
+                        if (elementType != null) {
+                            targetType = resolveProjectTypeName(elementType, packageName, imports, typesByQualifiedName);
+                        }
+
+                    }
+                }
+            }
+        }
+        if (targetType != null) {
+            var sameMethodsCount = 0;
+            MethodResponse methodResponse = null;
+            var targetClass = typesByQualifiedName.get(targetType);
+            for (var targetClassMethod : targetClass.methodResponseList()) {
+                if (callRsp.argumentCount() == targetClassMethod.parameters().size() &&
+                        callRsp.calledMethodName().equals(targetClassMethod.name())) {
+                    sameMethodsCount += 1;
+                    methodResponse = targetClassMethod;
+                }
+            }
+            if (sameMethodsCount == 1) {
+                methodSignature = methodResponse.signature();
+            }
+        }
+
+        var methodCallResponse = new MethodCallResponse(
+                callRsp.sourceType(), callRsp.sourceMethodSignature(), callRsp.calledMethodName(),
+                callRsp.scope(), callRsp.scopeType(), targetType, methodSignature, callRsp.argumentCount());
+        resolvedByExpr.put(call.methodCallExpr(), methodCallResponse);
+        return methodCallResponse;
+    }
+
+    private String resolveReturnType(MethodCallResponse resolvedCall,
+                                     Map<String, ClassDetailsResponse> typesByQualifiedName,
+                                     Map<String, List<ImportResponse>> importsByQualifiedName) {
+
+        var methodReturnType = rawReturnType(resolvedCall, typesByQualifiedName);
+        if (methodReturnType == null) return null;
+
+        return resolveInClassContext(methodReturnType, resolvedCall.targetType(), importsByQualifiedName, typesByQualifiedName);
+    }
+
+    private MethodResponse generatedMethod(String methodName, String returnType,
+                                           String parameterName, String parameterType) {
+        String signature;
+        List<ParameterResponse> parameterResponse = new ArrayList<>();
+        if (parameterType == null) {
+            signature = methodName + "()";
+        } else {
+            signature = methodName + "(" + parameterType + ")";
+            parameterResponse.add(new ParameterResponse(parameterName, parameterType,List.of(), List.of()));
+        }
+
+        return new MethodResponse(methodName, signature, returnType, List.of(), parameterResponse, List.of());
+    }
+
+    private void addIfMissing(List<MethodResponse> methodResponses, MethodResponse newResponse) {
+        var exists = methodResponses.stream().anyMatch(i ->
+                Objects.equals(i.name(), newResponse.name()) &&
+                i.parameters().size() == newResponse.parameters().size());
+        if (!exists) methodResponses.add(newResponse);
+    }
+
+    private String typeArgument(String text) {
+        if (text == null) return null;
+
+        var firstBrace = text.indexOf("<");
+        var lastBrace = text.lastIndexOf(">");
+        if (firstBrace == -1 || lastBrace == -1) return null;
+        var inside = text.substring(firstBrace+1, lastBrace).trim();
+        if (inside.contains(",") || inside.isEmpty()) return null;
+
+        return inside;
+    }
+
+    private String rawReturnType(MethodCallResponse resolvedCall,
+                                 Map<String, ClassDetailsResponse> typesByQualifiedName) {
+        if (resolvedCall.targetType() == null || resolvedCall.targetMethodSignature() == null) {
+            return null;
+        }
+
+        var innerClass = typesByQualifiedName.get(resolvedCall.targetType());
+
+        return innerClass.methodResponseList().stream()
+                .filter(i-> Objects.equals(i.signature(), resolvedCall.targetMethodSignature()))
+                .map(MethodResponse::returnType).findFirst().orElse(null);
+    }
+
+    private String typeOfCall(MethodCallExpr methodCallExpr, String sourceTypeName, String packageName,
+                              List<ImportResponse> imports, Map<String, ClassDetailsResponse> typesByQualifiedName,
+                              IdentityHashMap<MethodCallExpr, CallSite> sitesByExpr,
+                              IdentityHashMap<MethodCallExpr, MethodCallResponse> resolvedByExpr,
+                              Map<String, List<ImportResponse>> importsByQualifiedName) {
+
+        var callNames = Set.of("orElseThrow", "orElse", "orElseGet", "get");
+        if (callNames.contains(methodCallExpr.getNameAsString()) && methodCallExpr.getScope().isPresent() &&
+                methodCallExpr.getScope().get().isMethodCallExpr()) {
+
+            var innerCall = methodCallExpr.getScope().get().asMethodCallExpr();
+            if (!sitesByExpr.containsKey(innerCall)) return null;
+
+            var callSite = sitesByExpr.get(innerCall);
+            var innerResolved = resolveCall(callSite, sourceTypeName, packageName, imports,
+                    typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+
+            var raw = rawReturnType(innerResolved, typesByQualifiedName);
+            if (raw != null && raw.startsWith("Optional<")) {
+                var inside = typeArgument(raw);
+
+                return resolveInClassContext(inside, innerResolved.targetType(), importsByQualifiedName, typesByQualifiedName);
+            }
+        }
+
+        if (!sitesByExpr.containsKey(methodCallExpr)) return null;
+
+        var callSite = sitesByExpr.get(methodCallExpr);
+        var methodCallResponse = resolveCall(callSite, sourceTypeName, packageName, imports, typesByQualifiedName,
+                sitesByExpr, resolvedByExpr, importsByQualifiedName);
 
 
+        return resolveReturnType(methodCallResponse, typesByQualifiedName, importsByQualifiedName);
+    }
+
+    private String resolveInClassContext(String typeText, String classFullName,
+                                         Map<String, List<ImportResponse>> importsByQualifiedName,
+                                         Map<String, ClassDetailsResponse> typesByQualifiedName) {
+        if (typeText == null || classFullName == null) {
+            return null;
+        }
+
+        if (!typesByQualifiedName.containsKey(classFullName)) return null;
+
+        var foundClass = typesByQualifiedName.get(classFullName);
+        var foundImports = importsByQualifiedName.get(classFullName);
+        return resolveProjectTypeName(typeText, foundClass.packageName(), foundImports, typesByQualifiedName);
+    }
     // TODO add liquibase and flyway support
 }
