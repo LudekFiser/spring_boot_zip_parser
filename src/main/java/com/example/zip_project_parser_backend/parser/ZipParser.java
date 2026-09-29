@@ -6,7 +6,6 @@ import com.example.zip_project_parser_backend.enumeration.HttpMethodKind;
 import com.example.zip_project_parser_backend.enumeration.InheritanceDependencyKind;
 import com.example.zip_project_parser_backend.enumeration.MethodDependencyKind;
 import com.github.javaparser.JavaParser;
-import com.github.javaparser.ParseProblemException;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
@@ -59,7 +58,7 @@ public class ZipParser {
         return classesAndCode;
     }
 
-    public /*Map<String, List<ClassDetailsResponse>>*/ProjectAnalysisResponse getClassDetails(Map<String, String> map) {
+    public ProjectAnalysisResponse getClassDetails(Map<String, String> map) {
 
         Map<String, List<ClassDetailsResponse>> returnMap = new HashMap<>();
         Map<String, List<ImportResponse>> importsByPath = new HashMap<>();
@@ -68,6 +67,7 @@ public class ZipParser {
         List<EndpointResponse> endpointResponseList = new ArrayList<>();
         List<MethodCallResponse> methodCallResponseList = new ArrayList<>();
         var path = "";
+        List<AnalysisWarning> warnings = new ArrayList<>();
         for (var entry : map.entrySet()) {
             List<ClassDetailsResponse> classDetailsResponses = new ArrayList<>();
             List<CallSite> methodCallsResponses = new ArrayList<>();
@@ -78,7 +78,8 @@ public class ZipParser {
             javaParser.getParserConfiguration().setLanguageLevel(ParserConfiguration.LanguageLevel.JAVA_25);
             var parseResult = javaParser.parse(classCode);
             if(!parseResult.isSuccessful()) {
-                throw new ParseProblemException(parseResult.getProblems());
+                warnings.add(new AnalysisWarning(path ,parseResult.getProblems().getFirst().getVerboseMessage()));
+                continue;
             }
 
             CompilationUnit parsedCode = parseResult.getResult().orElseThrow();
@@ -196,7 +197,7 @@ public class ZipParser {
         var typeNamesByPackage = groupTypeNamesByPackage(returnMap);
 
         var packageTree = buildPackageTree(typeNamesByPackage);
-        return new ProjectAnalysisResponse(returnMap, typeNamesByPackage, packageTree, endpointResponseList,
+        return new ProjectAnalysisResponse(warnings, returnMap, typeNamesByPackage, packageTree, endpointResponseList,
                 methodCallResponseList, fieldDependencyResponseList, methodDependencyResponseList,
                 constructorDependencyResponseList, inheritanceDependencyResponseList);
     }
@@ -885,7 +886,6 @@ public class ZipParser {
                         break;
                     }
                 }
-
 
                 if (scopeName != null && scopeTypeName == null) {
                     var declarators = blockStmt.findAll(VariableDeclarator.class);

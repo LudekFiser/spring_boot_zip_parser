@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 public record ProjectAnalysisResponse(
+        List<AnalysisWarning> warnings,
         Map<String, List<ClassDetailsResponse>> classDetailsByPath,
         Map<String, List<String>> typesByPackage,
         List<PackageNodeResponse> packageTree,
