@@ -933,13 +933,41 @@ public class ZipParser {
         }
 
         var callRsp = call.methodCallResponse();
+        var scopeType = callRsp.scopeType();
         String targetType = null;
         String methodSignature = null;
+
         if (callRsp.scopeType() != null) {
             targetType = resolveProjectTypeName(callRsp.scopeType(), packageName, imports,typesByQualifiedName);
         }
         else if (callRsp.scope() == null || callRsp.scope().equals("this")) {
-            targetType = sourceTypeName;
+            if (Objects.equals(callRsp.scope(), "this") || typesByQualifiedName.get(callRsp.sourceType()).methodResponseList().stream().anyMatch(i->i.name().equals(callRsp.calledMethodName()))) {
+                targetType = sourceTypeName;
+            } else {
+                String owner = null;
+                String asteriskOwner = null;
+                for (var staticImport : imports.stream().filter(ImportResponse::isStatic).toList()) {
+                    if (staticImport.name().endsWith("." + callRsp.calledMethodName())) {
+                        owner = staticImport.name().substring(0, staticImport.name().lastIndexOf("."));
+                        break;
+                    } else if (staticImport.isAsterisk()) {
+                        asteriskOwner = staticImport.name();
+                    }
+                }
+
+                if (owner == null) {
+                    owner = asteriskOwner;
+                }
+                if (owner != null) {
+                    if (typesByQualifiedName.containsKey(owner)) {
+                        targetType = owner;
+                    } else {
+                        scopeType = owner.substring(owner.lastIndexOf(".") + 1);
+                    }
+                } else {
+                    targetType = sourceTypeName;
+                }
+            }
         }
         else if (call.methodCallExpr().getScope().isPresent() && call.methodCallExpr().getScope().get().isMethodCallExpr()) {
             var innerExp = call.methodCallExpr().getScope().get().asMethodCallExpr();
@@ -1012,7 +1040,7 @@ public class ZipParser {
 
         var methodCallResponse = new MethodCallResponse(
                 callRsp.sourceType(), callRsp.sourceMethodSignature(), callRsp.calledMethodName(),
-                callRsp.scope(), callRsp.scopeType(), targetType, methodSignature, callRsp.argumentCount());
+                callRsp.scope(), scopeType, targetType, methodSignature, callRsp.argumentCount());
         resolvedByExpr.put(call.methodCallExpr(), methodCallResponse);
         return methodCallResponse;
     }
@@ -1103,7 +1131,6 @@ public class ZipParser {
         var callSite = sitesByExpr.get(methodCallExpr);
         var methodCallResponse = resolveCall(callSite, sourceTypeName, packageName, imports, typesByQualifiedName,
                 sitesByExpr, resolvedByExpr, importsByQualifiedName);
-
 
         return resolveReturnType(methodCallResponse, typesByQualifiedName, importsByQualifiedName);
     }
