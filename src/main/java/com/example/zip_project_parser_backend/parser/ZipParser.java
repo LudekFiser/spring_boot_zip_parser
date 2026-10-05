@@ -54,7 +54,6 @@ public class ZipParser {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-
         return classesAndCode;
     }
 
@@ -115,7 +114,6 @@ public class ZipParser {
                         var constant = enumDeclaration.getEntry(k).getNameAsString();
                         constants.add(constant);
                     }
-
                 } else if (type.isClassOrInterfaceDeclaration()){
                     if (type.asClassOrInterfaceDeclaration().isInterface()) {
                         classKind = ClassKind.INTERFACE;
@@ -381,7 +379,6 @@ public class ZipParser {
                 fieldResponses.add(new FieldResponse(fieldName, fieldType, annotations, referencedType));
             }
         }
-
         return fieldResponses;
     }
 
@@ -552,7 +549,6 @@ public class ZipParser {
                 return importAsterisk;
             }
         }
-
         return null;
     }
 
@@ -645,7 +641,6 @@ public class ZipParser {
                     newList.add(className);
                     returnMap.put(packageName, newList);
                 }
-
             }
         }
         return returnMap;
@@ -685,7 +680,6 @@ public class ZipParser {
                 parent.typeNames().addAll(typeNames);
             }
         }
-
         return packageNodeResponses;
     }
 
@@ -696,7 +690,6 @@ public class ZipParser {
                 string.getName().getIdentifier().equals("RequestMapping")).findFirst().orElse(null);
 
         var classPaths = extractMappingPaths(classRequestMapping);
-
 
         var methodDeclaration = type.getMembers().stream()
                 .filter(BodyDeclaration::isMethodDeclaration)
@@ -728,7 +721,6 @@ public class ZipParser {
                             fullPath = classPath + methodPath;
                         }
 
-
                         if (!fullPath.startsWith("/")) {
                             fullPath = "/" + fullPath;
                         }
@@ -755,7 +747,6 @@ public class ZipParser {
             returnList.add("");
             return returnList;
         }
-
         if (annotationExpr.isSingleMemberAnnotationExpr()) {
             var singleMember = annotationExpr.asSingleMemberAnnotationExpr().getMemberValue();
             if (singleMember.isStringLiteralExpr()) {
@@ -771,7 +762,6 @@ public class ZipParser {
                 }
             }
         }
-
         if (annotationExpr.isNormalAnnotationExpr()) {
             var normalMembers = annotationExpr.asNormalAnnotationExpr().getPairs()
                     .stream()
@@ -795,7 +785,6 @@ public class ZipParser {
                 }
             }
         }
-
         return returnList;
     }
 
@@ -829,7 +818,6 @@ public class ZipParser {
                                 case "TRACE" -> returnList.add(HttpMethodKind.TRACE);
                             }
                         }
-
                         if (normal.getValue().isArrayInitializerExpr()) {
                             var arrayNormals = normal.getValue().asArrayInitializerExpr().getValues();
                             if (arrayNormals.isEmpty()) returnList.add(HttpMethodKind.ANY);
@@ -857,7 +845,6 @@ public class ZipParser {
             }
         }
         return returnList;
-
     }
 
     private List<CallSite> extractMethodCalls(TypeDeclaration<?> type, String declaringTypeName) {
@@ -912,13 +899,11 @@ public class ZipParser {
                         }
                     }
                 }
-
                 var argumentCount = methodCall.getArguments().size();
                 returnList.add(new CallSite(methodCall, new MethodCallResponse(declaringTypeName, method.getSignature().asString(),
                         calledMethodName, respScope, scopeTypeName,null, null, argumentCount)));
             }
         }
-
         return returnList;
     }
 
@@ -954,7 +939,6 @@ public class ZipParser {
                         asteriskOwner = staticImport.name();
                     }
                 }
-
                 if (owner == null) {
                     owner = asteriskOwner;
                 }
@@ -1023,19 +1007,34 @@ public class ZipParser {
             }
         }
         if (targetType != null) {
-            var sameMethodsCount = 0;
             MethodResponse methodResponse = null;
-            var targetClass = typesByQualifiedName.get(targetType);
-            for (var targetClassMethod : targetClass.methodResponseList()) {
-                if (callRsp.argumentCount() == targetClassMethod.parameters().size() &&
-                        callRsp.calledMethodName().equals(targetClassMethod.name())) {
-                    sameMethodsCount += 1;
-                    methodResponse = targetClassMethod;
+            var sameMethodsCount = 0;
+            String currentlySearchedClass = targetType;
+            Set<String> searched = new HashSet<>();
+
+            while (currentlySearchedClass != null) {
+                if (!searched.add(currentlySearchedClass)) break;
+                var targetClass = typesByQualifiedName.get(currentlySearchedClass);
+                for (var targetClassMethod : targetClass.methodResponseList()) {
+                    if (callRsp.argumentCount() == targetClassMethod.parameters().size() &&
+                            callRsp.calledMethodName().equals(targetClassMethod.name())) {
+                        sameMethodsCount += 1;
+                        methodResponse = targetClassMethod;
+                    }
+                }
+                if (sameMethodsCount == 0) {
+                    currentlySearchedClass = superClassOf(currentlySearchedClass, importsByQualifiedName, typesByQualifiedName);
+                }
+                else if (sameMethodsCount == 1) {
+                    methodSignature = methodResponse.signature();
+                    targetType = currentlySearchedClass;
+                    break;
+                }
+                else {
+                    break;
                 }
             }
-            if (sameMethodsCount == 1) {
-                methodSignature = methodResponse.signature();
-            }
+
         }
 
         var methodCallResponse = new MethodCallResponse(
@@ -1147,6 +1146,18 @@ public class ZipParser {
         var foundClass = typesByQualifiedName.get(classFullName);
         var foundImports = importsByQualifiedName.get(classFullName);
         return resolveProjectTypeName(typeText, foundClass.packageName(), foundImports, typesByQualifiedName);
+    }
+
+
+    private String superClassOf(String classFullName, Map<String, List<ImportResponse>> importsByQualifiedName,
+                                Map<String, ClassDetailsResponse> typesByQualifiedName) {
+        if (!typesByQualifiedName.containsKey(classFullName)) {
+            return null;
+        }
+        var foundClass = typesByQualifiedName.get(classFullName).inheritanceResponse().extendedTypes();
+        if (foundClass.isEmpty()) return null;
+        var firstExtType = foundClass.getFirst();
+        return resolveInClassContext(firstExtType.baseType(), classFullName, importsByQualifiedName, typesByQualifiedName);
     }
     // TODO add liquibase and flyway support
 }
