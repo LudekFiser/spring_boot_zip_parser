@@ -14,6 +14,7 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.expr.ArrayAccessExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
 import com.github.javaparser.ast.stmt.ForEachStmt;
@@ -35,7 +36,7 @@ public class ZipParser {
 
         Map<String, String> classesAndCode = new HashMap<>();
 
-        try(var inputStream = new ZipInputStream(zip.getInputStream()); ){
+        try(var inputStream = new ZipInputStream(zip.getInputStream())){
             ZipEntry entry;
             while ((entry = inputStream.getNextEntry()) != null) {
                 if (entry.getName().startsWith("_") || !entry.getName().endsWith(".java")) {
@@ -862,19 +863,28 @@ public class ZipParser {
                 var respScope = methodCall.getScope().map(Node::toString).orElse(null);
                 String scopeName = null;
                 boolean foundLocal = false;
-                if (scope != null && scope.isNameExpr()) {
-                    scopeName = scope.asNameExpr().getNameAsString();
+                boolean isThis = false;
+                if (scope != null) {
+                    if (scope.isNameExpr()) {
+                        scopeName = scope.asNameExpr().getNameAsString();
+                    }
+                    else if (scope.isFieldAccessExpr()) {
+                        if (scope.asFieldAccessExpr().getScope().isThisExpr()) {
+                            isThis = true;
+                            scopeName = scope.asFieldAccessExpr().getNameAsString();
+                        }
+                    }
                 }
                 String scopeTypeName = null;
                 for (var u = 0; u < method.getParameters().size(); u++) {
                     var declarationParameter = method.getParameter(u);
-                    if (declarationParameter.getNameAsString().equals(scopeName)) {
+                    if (declarationParameter.getNameAsString().equals(scopeName) && !isThis) {
                         scopeTypeName = declarationParameter.getType().asString();
                         break;
                     }
                 }
 
-                if (scopeName != null && scopeTypeName == null) {
+                if (scopeName != null && scopeTypeName == null && !isThis) {
                     var declarators = blockStmt.findAll(VariableDeclarator.class);
                     for (var decl : declarators) {
                         if (decl.getNameAsString().equals(scopeName)) {
