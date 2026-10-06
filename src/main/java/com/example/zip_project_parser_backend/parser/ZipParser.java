@@ -965,7 +965,20 @@ public class ZipParser {
         }
         else if (call.methodCallExpr().getScope().isPresent() && call.methodCallExpr().getScope().get().isMethodCallExpr()) {
             var innerExp = call.methodCallExpr().getScope().get().asMethodCallExpr();
-            targetType = typeOfCall(innerExp, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+
+            var projectType = typeOfCall(innerExp, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+            if (projectType == null) {
+                var found = sitesByExpr.get(innerExp);
+                if (found != null) {
+                    var resolved = resolveCall(found, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+                    var rawReturnType = rawReturnType(resolved, typesByQualifiedName);
+                    if (rawReturnType != null) {
+                        scopeType = simpleTypeName(rawReturnType);
+                    }
+                }
+            } else {
+                targetType = projectType;
+            }
         }
         else if(call.methodCallExpr().getScope().isPresent() && call.methodCallExpr().getScope().get().isNameExpr()) {
             var nameExpr = call.methodCallExpr().getScope().get().asNameExpr();
@@ -979,7 +992,20 @@ public class ZipParser {
 
                 if (initializer.isPresent() && initializer.get().isMethodCallExpr()) {
                     var initCall = initializer.get().asMethodCallExpr();
-                    targetType = typeOfCall(initCall, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+
+                    var projectType = typeOfCall(initCall, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+                    if (projectType == null) {
+                        var found = sitesByExpr.get(initCall);
+                        if (found != null) {
+                            var resolved = resolveCall(found, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
+                            var rawReturnType = rawReturnType(resolved, typesByQualifiedName);
+                            if (rawReturnType != null) {
+                                scopeType = simpleTypeName(rawReturnType);
+                            }
+                        }
+                    } else {
+                        targetType = projectType;
+                    }
                 }
                 else if (declarator.isPresent() && (ancestor.isPresent() && ancestor.get().getVariableDeclarator().equals(declarator.get()))) {
                     if (ancestor.get().getIterable().isNameExpr()) {
@@ -1158,7 +1184,6 @@ public class ZipParser {
         return resolveProjectTypeName(typeText, foundClass.packageName(), foundImports, typesByQualifiedName);
     }
 
-
     private String superClassOf(String classFullName, Map<String, List<ImportResponse>> importsByQualifiedName,
                                 Map<String, ClassDetailsResponse> typesByQualifiedName) {
         if (!typesByQualifiedName.containsKey(classFullName)) {
@@ -1168,6 +1193,24 @@ public class ZipParser {
         if (foundClass.isEmpty()) return null;
         var firstExtType = foundClass.getFirst();
         return resolveInClassContext(firstExtType.baseType(), classFullName, importsByQualifiedName, typesByQualifiedName);
+    }
+
+    private String simpleTypeName(String typeText) {
+        if (typeText.contains("<")) {
+            var substring = typeText.substring(0, typeText.indexOf("<"));
+            if (substring.contains(".")) {
+                return substring.substring(substring.lastIndexOf(".") + 1);
+            }
+            else {
+                return substring;
+            }
+        }
+        else if (typeText.contains(".")) {
+            return typeText.substring(typeText.lastIndexOf(".") + 1);
+        }
+        else {
+            return typeText;
+        }
     }
     // TODO add liquibase and flyway support
 }
