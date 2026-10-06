@@ -1,10 +1,7 @@
 package com.example.zip_project_parser_backend.parser;
 
 import com.example.zip_project_parser_backend.dto.*;
-import com.example.zip_project_parser_backend.enumeration.ClassKind;
-import com.example.zip_project_parser_backend.enumeration.HttpMethodKind;
-import com.example.zip_project_parser_backend.enumeration.InheritanceDependencyKind;
-import com.example.zip_project_parser_backend.enumeration.MethodDependencyKind;
+import com.example.zip_project_parser_backend.enumeration.*;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
@@ -14,7 +11,6 @@ import com.github.javaparser.ast.body.MethodDeclaration;
 import com.github.javaparser.ast.body.TypeDeclaration;
 import com.github.javaparser.ast.body.VariableDeclarator;
 import com.github.javaparser.ast.expr.AnnotationExpr;
-import com.github.javaparser.ast.expr.ArrayAccessExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
 import com.github.javaparser.ast.stmt.ForEachStmt;
@@ -26,6 +22,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -68,6 +65,7 @@ public class ZipParser {
         List<MethodCallResponse> methodCallResponseList = new ArrayList<>();
         var path = "";
         List<AnalysisWarning> warnings = new ArrayList<>();
+        List<TestClassResponse> testClassResponseList = new ArrayList<>();
         for (var entry : map.entrySet()) {
             List<ClassDetailsResponse> classDetailsResponses = new ArrayList<>();
             List<CallSite> methodCallsResponses = new ArrayList<>();
@@ -141,6 +139,8 @@ public class ZipParser {
                 endpointResponseList.addAll(extractEndpoints(type, declaringTypeName));
                 methodCallsResponses.addAll(extractMethodCalls(type, declaringTypeName));
                 importsByQualifiedName.put(declaringTypeName, imports);
+                var testClass = extractTestClass(type, declaringTypeName);
+                if (testClass != null) testClassResponseList.add(testClass);
             }
             methodCalls.put(path, methodCallsResponses);
             returnMap.put(path, classDetailsResponses);
@@ -196,7 +196,8 @@ public class ZipParser {
         var typeNamesByPackage = groupTypeNamesByPackage(returnMap);
 
         var packageTree = buildPackageTree(typeNamesByPackage);
-        return new ProjectAnalysisResponse(warnings, returnMap, typeNamesByPackage, packageTree, endpointResponseList,
+        return new ProjectAnalysisResponse(warnings, testClassResponseList,
+                returnMap, typeNamesByPackage, packageTree, endpointResponseList,
                 methodCallResponseList, fieldDependencyResponseList, methodDependencyResponseList,
                 constructorDependencyResponseList, inheritanceDependencyResponseList);
     }
@@ -1037,7 +1038,6 @@ public class ZipParser {
                         if (elementType != null) {
                             targetType = resolveProjectTypeName(elementType, packageName, imports, typesByQualifiedName);
                         }
-
                     }
                 }
             }
@@ -1070,9 +1070,7 @@ public class ZipParser {
                     break;
                 }
             }
-
         }
-
         var methodCallResponse = new MethodCallResponse(
                 callRsp.sourceType(), callRsp.sourceMethodSignature(), callRsp.calledMethodName(),
                 callRsp.scope(), scopeType, targetType, methodSignature, callRsp.argumentCount());
@@ -1212,5 +1210,35 @@ public class ZipParser {
             return typeText;
         }
     }
+
+    private TestClassResponse extractTestClass(TypeDeclaration<?> type, String classFullName) {
+
+        List<String> testAnnotations = List.of("Test", "ParameterizedTest", "RepeatedTest", "TestFactory", "TestTemplate");
+        var methods = type.getMethods().stream()
+                .filter(i->testAnnotations.stream().anyMatch(a-> i.isAnnotationPresent(a)))
+                .toList();
+
+        var classAnnotations = type.getAnnotations();
+        if (methods.isEmpty()) return null;
+        List<String> testMethods = new ArrayList<>();
+        String integrationTest = "SpringBootTest";
+        List<String> sliceTests = List.of("WebMvcTest", "DataJpaTest", "JsonTest", "RestClientTest", "WebFluxTest",
+                "JdbcTest", "DataJdbcTest", "DataMongoTest");
+        TestKind testKind = TestKind.UNIT;
+        for (var classAnnotation : classAnnotations) {
+
+            if (classAnnotation.getNameAsString().equals(integrationTest)) {
+                testKind = TestKind.INTEGRATION;
+            }
+            else if (sliceTests.contains(classAnnotation.getNameAsString())) {
+                testKind = TestKind.SLICE;
+            }
+        }
+        for (var method : methods) {
+            testMethods.add(method.getSignature().asString());
+        }
+        return new TestClassResponse(classFullName, testKind, testMethods);
+    }
+
     // TODO add liquibase and flyway support
 }

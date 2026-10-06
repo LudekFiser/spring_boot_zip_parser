@@ -6,6 +6,7 @@ import java.util.Map;
 
 public record ProjectAnalysisResponse(
         List<AnalysisWarning> warnings,
+        List<TestClassResponse> tests,
         Map<String, List<ClassDetailsResponse>> classDetailsByPath,
         Map<String, List<String>> typesByPackage,
         List<PackageNodeResponse> packageTree,
