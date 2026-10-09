@@ -90,10 +90,20 @@ public class ZipParser {
             var imports = extractImports(parsedCode);
             importsByPath.put(path, imports);
 
-            for (var i = 0; i < parsedCode.getTypes().size(); i++) {
-                var type = parsedCode.getType(i);
+            var allTypes = parsedCode.findAll(TypeDeclaration.class)
+                    .stream()
+                    .filter(i-> i.findAncestor(MethodDeclaration.class).isEmpty())
+                    .map(t -> (TypeDeclaration<?>) t)
+                    .toList();
+            for (var type : allTypes) {
+                String className;
+                var classNameBeforeChange = type.getFullyQualifiedName().get();
+                if (packageName == null || packageName.isEmpty()) {
+                    className = classNameBeforeChange;
+                } else {
+                    className = classNameBeforeChange.substring(packageName.length() + 1);
+                }
 
-                var className = type.getNameAsString();
                 var annotationsLoop = type.getAnnotations()
                         .stream()
                         .map(Node::toString)
