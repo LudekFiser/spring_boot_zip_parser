@@ -7,6 +7,7 @@ import java.util.List;
 public record TestClassResponse(
         String classFullName,
         TestKind testKind,
-        List<String> testMethods
+        List<String> testMethods,
+        List<TestRequestResponse> requests
 ) {
 }

@@ -1225,6 +1225,8 @@ public class ZipParser {
         List<String> sliceTests = List.of("WebMvcTest", "DataJpaTest", "JsonTest", "RestClientTest", "WebFluxTest",
                 "JdbcTest", "DataJdbcTest", "DataMongoTest");
         TestKind testKind = TestKind.UNIT;
+        List<String> callings = List.of("get", "post", "put", "patch", "delete");
+        List<TestRequestResponse> testRequestResponseList = new ArrayList<>();
         for (var classAnnotation : classAnnotations) {
 
             if (classAnnotation.getNameAsString().equals(integrationTest)) {
@@ -1235,9 +1237,18 @@ public class ZipParser {
             }
         }
         for (var method : methods) {
-            testMethods.add(method.getSignature().asString());
+            var signature = method.getSignature().asString();
+            testMethods.add(signature);
+            var methodCallExpr = method.findAll(MethodCallExpr.class)
+                    .stream()
+                    .filter(i-> callings.contains(i.getNameAsString()) &&
+                            (i.getScope().isEmpty() || (i.getScope().get().isNameExpr() && i.getScope().get().asNameExpr().getNameAsString().equals("MockMvcRequestBuilders"))) &&
+                            !i.getArguments().isEmpty() && i.getArguments().getFirst().get().isStringLiteralExpr())
+                    .map(e -> new TestRequestResponse(signature, HttpMethodKind.valueOf(e.getNameAsString().toUpperCase()), e.getArguments().getFirst().get().asStringLiteralExpr().asString()))
+                    .toList();
+            testRequestResponseList.addAll(methodCallExpr);
         }
-        return new TestClassResponse(classFullName, testKind, testMethods);
+        return new TestClassResponse(classFullName, testKind, testMethods, testRequestResponseList);
     }
 
     // TODO add liquibase and flyway support
