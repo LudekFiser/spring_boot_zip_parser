@@ -1228,24 +1228,17 @@ public class ZipParser {
                 .filter(i->testAnnotations.stream().anyMatch(a-> i.isAnnotationPresent(a)))
                 .toList();
 
-        var classAnnotations = type.getAnnotations();
         if (methods.isEmpty()) return null;
         List<String> testMethods = new ArrayList<>();
-        String integrationTest = "SpringBootTest";
-        List<String> sliceTests = List.of("WebMvcTest", "DataJpaTest", "JsonTest", "RestClientTest", "WebFluxTest",
-                "JdbcTest", "DataJdbcTest", "DataMongoTest");
-        TestKind testKind = TestKind.UNIT;
+        TestKind testKind = testKindOf(type);
+        var outerClass = type.findAncestor(TypeDeclaration.class);
+        while (testKind == TestKind.UNIT && outerClass.isPresent()) {
+            testKind = testKindOf(outerClass.get());
+            outerClass = outerClass.get().findAncestor(TypeDeclaration.class);
+        }
         List<String> callings = List.of("get", "post", "put", "patch", "delete");
         List<TestRequestResponse> testRequestResponseList = new ArrayList<>();
-        for (var classAnnotation : classAnnotations) {
 
-            if (classAnnotation.getNameAsString().equals(integrationTest)) {
-                testKind = TestKind.INTEGRATION;
-            }
-            else if (sliceTests.contains(classAnnotation.getNameAsString())) {
-                testKind = TestKind.SLICE;
-            }
-        }
         for (var method : methods) {
             var signature = method.getSignature().asString();
             testMethods.add(signature);
@@ -1259,6 +1252,26 @@ public class ZipParser {
             testRequestResponseList.addAll(methodCallExpr);
         }
         return new TestClassResponse(classFullName, testKind, testMethods, testRequestResponseList);
+    }
+
+
+    private TestKind testKindOf(TypeDeclaration<?> type) {
+        var classAnnotations = type.getAnnotations();
+
+        String integrationTest = "SpringBootTest";
+        List<String> sliceTests = List.of("WebMvcTest", "DataJpaTest", "JsonTest", "RestClientTest", "WebFluxTest",
+                "JdbcTest", "DataJdbcTest", "DataMongoTest");
+        TestKind testKind = TestKind.UNIT;
+
+        for (var classAnnotation : classAnnotations) {
+            if (classAnnotation.getNameAsString().equals(integrationTest)) {
+                testKind = TestKind.INTEGRATION;
+            }
+            else if (sliceTests.contains(classAnnotation.getNameAsString())) {
+                testKind = TestKind.SLICE;
+            }
+        }
+        return testKind;
     }
 
     // TODO add liquibase and flyway support
