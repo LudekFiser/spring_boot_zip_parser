@@ -9,6 +9,7 @@ import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
+import com.github.javaparser.ast.nodeTypes.NodeWithName;
 import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
 import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ForEachStmt;
@@ -64,6 +65,8 @@ public class ZipParser {
         var path = "";
         List<AnalysisWarning> warnings = new ArrayList<>();
         List<TestClassResponse> testClassResponseList = new ArrayList<>();
+        Map<String, List<String>> compositeAnnotations = new HashMap<>();
+        List<PendingTest> pendingTestList = new ArrayList<>();
         for (var entry : map.entrySet()) {
             List<ClassDetailsResponse> classDetailsResponses = new ArrayList<>();
             List<CallSite> methodCallsResponses = new ArrayList<>();
@@ -114,6 +117,7 @@ public class ZipParser {
                     classKind = ClassKind.RECORD;
                 } else if (type.isAnnotationDeclaration()) {
                     classKind = ClassKind.ANNOTATION;
+                    compositeAnnotations.put(type.asAnnotationDeclaration().getNameAsString(), type.getAnnotations().stream().map(NodeWithName::getNameAsString).toList());
                 } else if (type.isEnumDeclaration()) {
                     classKind = ClassKind.ENUM;
                     var enumDeclaration = type.asEnumDeclaration();
@@ -147,11 +151,15 @@ public class ZipParser {
                 endpointResponseList.addAll(extractEndpoints(type, declaringTypeName));
                 methodCallsResponses.addAll(extractMethodCalls(type, declaringTypeName));
                 importsByQualifiedName.put(declaringTypeName, imports);
-                var testClass = extractTestClass(type, declaringTypeName);
-                if (testClass != null) testClassResponseList.add(testClass);
+
+                pendingTestList.add(new PendingTest(type, declaringTypeName));
             }
             methodCalls.put(path, methodCallsResponses);
             returnMap.put(path, classDetailsResponses);
+        }
+        for (var pending : pendingTestList) {
+            var testClass = extractTestClass(pending.type(), pending.classFullName(), compositeAnnotations);
+            if (testClass != null) testClassResponseList.add(testClass);
         }
         var typesByQualifiedName = mapTypesByQualifiedName(returnMap);
         List<FieldDependencyResponse> fieldDependencyResponseList = new ArrayList<>();
@@ -923,8 +931,6 @@ public class ZipParser {
                         scopeTypeName = scopeName;
                     }
                 }
-
-
                 var argumentCount = methodCall.getArguments().size();
                 returnList.add(new CallSite(methodCall, new MethodCallResponse(null, declaringTypeName, method.getSignature().asString(),
                         calledMethodName, respScope, scopeTypeName,null, null, argumentCount)));
@@ -1252,19 +1258,19 @@ public class ZipParser {
         }
     }
 
-    private TestClassResponse extractTestClass(TypeDeclaration<?> type, String classFullName) {
+    private TestClassResponse extractTestClass(TypeDeclaration<?> type, String classFullName, Map<String, List<String>> compositeAnnotations) {
 
         List<String> testAnnotations = List.of("Test", "ParameterizedTest", "RepeatedTest", "TestFactory", "TestTemplate");
         var methods = type.getMethods().stream()
-                .filter(i->testAnnotations.stream().anyMatch(a-> i.isAnnotationPresent(a)))
+                .filter(i->testAnnotations.stream().anyMatch(i::isAnnotationPresent))
                 .toList();
 
         if (methods.isEmpty()) return null;
         List<String> testMethods = new ArrayList<>();
-        TestKind testKind = testKindOf(type);
+        TestKind testKind = testKindOf(type, compositeAnnotations);
         var outerClass = type.findAncestor(TypeDeclaration.class);
         while (testKind == TestKind.UNIT && outerClass.isPresent()) {
-            testKind = testKindOf(outerClass.get());
+            testKind = testKindOf(outerClass.get(), compositeAnnotations);
             outerClass = outerClass.get().findAncestor(TypeDeclaration.class);
         }
         List<String> callings = List.of("get", "post", "put", "patch", "delete");
@@ -1285,7 +1291,7 @@ public class ZipParser {
         return new TestClassResponse(classFullName, testKind, testMethods, testRequestResponseList);
     }
 
-    private TestKind testKindOf(TypeDeclaration<?> type) {
+    private TestKind testKindOf(TypeDeclaration<?> type, Map<String, List<String>> compositeAnnotations) {
         var classAnnotations = type.getAnnotations();
 
         String integrationTest = "SpringBootTest";
@@ -1294,11 +1300,24 @@ public class ZipParser {
         TestKind testKind = TestKind.UNIT;
 
         for (var classAnnotation : classAnnotations) {
+            var annotationName = classAnnotation.getNameAsString();
             if (classAnnotation.getNameAsString().equals(integrationTest)) {
                 testKind = TestKind.INTEGRATION;
             }
             else if (sliceTests.contains(classAnnotation.getNameAsString())) {
                 testKind = TestKind.SLICE;
+            }
+            else {
+                if (compositeAnnotations.containsKey(annotationName)) {
+                    for (var comp : compositeAnnotations.get(annotationName)) {
+                        if (comp.equals(integrationTest)) {
+                            testKind = TestKind.INTEGRATION;
+                        }
+                        else if (sliceTests.contains(comp)) {
+                            testKind = TestKind.SLICE;
+                        }
+                    }
+                }
             }
         }
         return testKind;
