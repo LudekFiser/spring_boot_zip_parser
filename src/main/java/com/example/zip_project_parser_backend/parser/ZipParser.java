@@ -873,6 +873,7 @@ public class ZipParser {
                 String scopeName = null;
                 boolean foundLocal = false;
                 boolean isThis = false;
+                String scopeTypeName = null;
                 if (scope != null) {
                     if (scope.isNameExpr()) {
                         scopeName = scope.asNameExpr().getNameAsString();
@@ -883,8 +884,10 @@ public class ZipParser {
                             scopeName = scope.asFieldAccessExpr().getNameAsString();
                         }
                     }
+                    else if (scope.isObjectCreationExpr()) {
+                        scopeTypeName = simpleTypeName(scope.asObjectCreationExpr().getTypeAsString());
+                    }
                 }
-                String scopeTypeName = null;
                 for (var u = 0; u < method.getParameters().size(); u++) {
                     var declarationParameter = method.getParameter(u);
                     if (declarationParameter.getNameAsString().equals(scopeName) && !isThis) {
@@ -902,7 +905,7 @@ public class ZipParser {
                                 scopeTypeName = decl.getTypeAsString();
                             } else if (decl.getInitializer().isPresent() &&
                                     decl.getInitializer().get().isObjectCreationExpr()) {
-                                scopeTypeName = decl.getInitializer().get().asObjectCreationExpr().getTypeAsString();
+                                scopeTypeName = simpleTypeName(decl.getInitializer().get().asObjectCreationExpr().getTypeAsString());
                             }
                             break;
                         }
@@ -946,7 +949,7 @@ public class ZipParser {
         String methodSignature = null;
         CallResolution callResolution;
         boolean callOnLibraryCall = false;
-        final List<String> ELEMENT_ACCESSORS = List.of("get", "getFirst", "getLast", "orElse", "orElseGet", "orElseThrow", "next", "getBody", "getValue", "getKey");
+        List<String> elementAccessors = List.of("get", "getFirst", "getLast", "orElse", "orElseGet", "orElseThrow", "next", "getBody", "getValue", "getKey");
 
         if (callRsp.scopeType() != null) {
             targetType = resolveProjectTypeName(callRsp.scopeType(), packageName, imports,typesByQualifiedName);
@@ -992,7 +995,7 @@ public class ZipParser {
                         scopeType = simpleTypeName(rawReturnType);
                     }
                     else if (resolved.callResolution() == CallResolution.EXTERNAL &&
-                            !ELEMENT_ACCESSORS.contains(resolved.calledMethodName())) {
+                            !elementAccessors.contains(resolved.calledMethodName())) {
                         callOnLibraryCall = true;
                     }
                 }
@@ -1022,6 +1025,11 @@ public class ZipParser {
                             var rawReturnType = rawReturnType(resolved, typesByQualifiedName);
                             if (rawReturnType != null) {
                                 scopeType = simpleTypeName(rawReturnType);
+                            }
+
+                            else if (resolved.callResolution() == CallResolution.EXTERNAL &&
+                                    !elementAccessors.contains(resolved.calledMethodName())) {
+                                callOnLibraryCall = true;
                             }
                         }
                     } else {
