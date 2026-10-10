@@ -8,6 +8,7 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithName;
 import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
@@ -1181,7 +1182,6 @@ public class ZipParser {
         if (resolvedCall.targetType() == null || resolvedCall.targetMethodSignature() == null) {
             return null;
         }
-
         var innerClass = typesByQualifiedName.get(resolvedCall.targetType());
 
         return innerClass.methodResponseList().stream()
@@ -1196,6 +1196,8 @@ public class ZipParser {
                               Map<String, List<ImportResponse>> importsByQualifiedName) {
 
         var callNames = Set.of("orElseThrow", "orElse", "orElseGet", "get");
+        var methodNames = List.of("body", "readValue", "convertValue", "treeToValue", "getForObject",
+                "postForObject", "getBean", "mock", "spy", "queryForObject", "find", "getReference");
         if (callNames.contains(methodCallExpr.getNameAsString()) && methodCallExpr.getScope().isPresent() &&
                 methodCallExpr.getScope().get().isMethodCallExpr()) {
 
@@ -1220,7 +1222,17 @@ public class ZipParser {
         var methodCallResponse = resolveCall(callSite, sourceTypeName, packageName, imports, typesByQualifiedName,
                 sitesByExpr, resolvedByExpr, importsByQualifiedName);
 
-        return resolveReturnType(methodCallResponse, typesByQualifiedName, importsByQualifiedName);
+        var result = resolveReturnType(methodCallResponse, typesByQualifiedName, importsByQualifiedName);
+        if (result != null) {
+            return result;
+        }
+        else if(methodNames.contains(methodCallExpr.getNameAsString())) {
+            var first = methodCallExpr.getArguments().stream().filter(Expression::isClassExpr).findFirst();
+            if (first.isPresent()) {
+                return resolveProjectTypeName(simpleTypeName(first.get().asClassExpr().getTypeAsString()), packageName, imports, typesByQualifiedName);
+            }
+        }
+        return null;
     }
 
     private String resolveInClassContext(String typeText, String classFullName,
