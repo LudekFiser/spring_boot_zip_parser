@@ -952,7 +952,7 @@ public class ZipParser {
         List<String> elementAccessors = List.of("get", "getFirst", "getLast", "orElse", "orElseGet", "orElseThrow", "next", "getBody", "getValue", "getKey");
 
         if (callRsp.scopeType() != null) {
-            targetType = resolveProjectTypeName(callRsp.scopeType(), packageName, imports,typesByQualifiedName);
+            targetType = resolveProjectTypeName(simpleTypeName(callRsp.scopeType()), packageName, imports,typesByQualifiedName);
         }
         else if (callRsp.scope() == null || callRsp.scope().equals("this")) {
             if (Objects.equals(callRsp.scope(), "this") || typesByQualifiedName.get(callRsp.sourceType()).methodResponseList().stream().anyMatch(i->i.name().equals(callRsp.calledMethodName()))) {
