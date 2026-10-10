@@ -955,8 +955,12 @@ public class ZipParser {
         String methodSignature = null;
         CallResolution callResolution;
         boolean callOnLibraryCall = false;
-        List<String> elementAccessors = List.of("get", "getFirst", "getLast", "orElse", "orElseGet", "orElseThrow", "next", "getBody", "getValue", "getKey");
-
+        List<String> elementAccessors = List.of(
+                "get", "getFirst", "getLast", "orElse", "orElseGet", "orElseThrow",
+                "next", "getBody", "getValue", "getKey");
+        List<String> containers = List.of(
+                "List", "Set", "Collection", "Map", "Optional", "Iterator", "Entry",
+                "ResponseEntity", "Page", "ArgumentCaptor", "HashMap", "ArrayList", "LinkedHashMap", "AtomicReference");
         if (callRsp.scopeType() != null) {
             targetType = resolveProjectTypeName(simpleTypeName(callRsp.scopeType()), packageName, imports,typesByQualifiedName);
         }
@@ -997,11 +1001,14 @@ public class ZipParser {
                 if (found != null) {
                     var resolved = resolveCall(found, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
                     var rawReturnType = rawReturnType(resolved, typesByQualifiedName);
+                    boolean containerOrUnknown = resolved.scopeType() == null ||
+                            containers.contains(simpleTypeName(resolved.scopeType()));
+
                     if (rawReturnType != null) {
                         scopeType = simpleTypeName(rawReturnType);
                     }
                     else if (resolved.callResolution() == CallResolution.EXTERNAL &&
-                            !elementAccessors.contains(resolved.calledMethodName())) {
+                            !(elementAccessors.contains(resolved.calledMethodName()) && containerOrUnknown)) {
                         callOnLibraryCall = true;
                     }
                 }
@@ -1029,12 +1036,13 @@ public class ZipParser {
                         if (found != null) {
                             var resolved = resolveCall(found, sourceTypeName, packageName, imports, typesByQualifiedName, sitesByExpr, resolvedByExpr, importsByQualifiedName);
                             var rawReturnType = rawReturnType(resolved, typesByQualifiedName);
+                            boolean containerOrUnknown = resolved.scopeType() == null ||
+                                    containers.contains(simpleTypeName(resolved.scopeType()));
                             if (rawReturnType != null) {
                                 scopeType = simpleTypeName(rawReturnType);
                             }
-
                             else if (resolved.callResolution() == CallResolution.EXTERNAL &&
-                                    !elementAccessors.contains(resolved.calledMethodName())) {
+                                    !(elementAccessors.contains(resolved.calledMethodName()) && containerOrUnknown)) {
                                 callOnLibraryCall = true;
                             }
                         }
@@ -1066,7 +1074,7 @@ public class ZipParser {
                         else if (iterableDeclarator.isEmpty()) {
                             var parameter = enclosingMethod.getParameterByName(ancestorName.getNameAsString());
                             if (parameter.isPresent()) {
-                                elementType = typeArgument( parameter.get().getTypeAsString());
+                                elementType = typeArgument(parameter.get().getTypeAsString());
                             }
                         }
                         if (elementType != null) {
