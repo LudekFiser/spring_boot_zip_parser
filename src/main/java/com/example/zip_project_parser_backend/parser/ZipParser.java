@@ -920,8 +920,10 @@ public class ZipParser {
                         scopeTypeName = scopeName;
                     }
                 }
+
+
                 var argumentCount = methodCall.getArguments().size();
-                returnList.add(new CallSite(methodCall, new MethodCallResponse(declaringTypeName, method.getSignature().asString(),
+                returnList.add(new CallSite(methodCall, new MethodCallResponse(null, declaringTypeName, method.getSignature().asString(),
                         calledMethodName, respScope, scopeTypeName,null, null, argumentCount)));
             }
         }
@@ -942,6 +944,9 @@ public class ZipParser {
         var scopeType = callRsp.scopeType();
         String targetType = null;
         String methodSignature = null;
+        CallResolution callResolution;
+        boolean callOnLibraryCall = false;
+        final List<String> ELEMENT_ACCESSORS = List.of("get", "getFirst", "getLast", "orElse", "orElseGet", "orElseThrow", "next", "getBody", "getValue", "getKey");
 
         if (callRsp.scopeType() != null) {
             targetType = resolveProjectTypeName(callRsp.scopeType(), packageName, imports,typesByQualifiedName);
@@ -985,6 +990,10 @@ public class ZipParser {
                     var rawReturnType = rawReturnType(resolved, typesByQualifiedName);
                     if (rawReturnType != null) {
                         scopeType = simpleTypeName(rawReturnType);
+                    }
+                    else if (resolved.callResolution() == CallResolution.EXTERNAL &&
+                            !ELEMENT_ACCESSORS.contains(resolved.calledMethodName())) {
+                        callOnLibraryCall = true;
                     }
                 }
             } else {
@@ -1082,9 +1091,22 @@ public class ZipParser {
                 }
             }
         }
+        if (targetType != null && methodSignature != null) {
+            callResolution = CallResolution.RESOLVED;
+        }
+        else if (targetType != null) {
+            callResolution = CallResolution.METHOD_UNKNOWN;
+        }
+        else if (scopeType != null || callOnLibraryCall) {
+            callResolution = CallResolution.EXTERNAL;
+        }
+        else {
+            callResolution = CallResolution.TYPE_UNKNOWN;
+        }
         var methodCallResponse = new MethodCallResponse(
-                callRsp.sourceType(), callRsp.sourceMethodSignature(), callRsp.calledMethodName(),
-                callRsp.scope(), scopeType, targetType, methodSignature, callRsp.argumentCount());
+                callResolution, callRsp.sourceType(), callRsp.sourceMethodSignature(),
+                callRsp.calledMethodName(), callRsp.scope(), scopeType, targetType,
+                methodSignature, callRsp.argumentCount());
         resolvedByExpr.put(call.methodCallExpr(), methodCallResponse);
         return methodCallResponse;
     }
@@ -1255,7 +1277,6 @@ public class ZipParser {
         return new TestClassResponse(classFullName, testKind, testMethods, testRequestResponseList);
     }
 
-
     private TestKind testKindOf(TypeDeclaration<?> type) {
         var classAnnotations = type.getAnnotations();
 
@@ -1274,7 +1295,6 @@ public class ZipParser {
         }
         return testKind;
     }
-
 
     private Optional<BlockStmt> getMethodOrConstructorBody(CallableDeclaration<?> callable) {
         if (callable.isMethodDeclaration()) {
