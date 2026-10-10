@@ -6,13 +6,11 @@ import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
-import com.github.javaparser.ast.body.BodyDeclaration;
-import com.github.javaparser.ast.body.MethodDeclaration;
-import com.github.javaparser.ast.body.TypeDeclaration;
-import com.github.javaparser.ast.body.VariableDeclarator;
+import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.AnnotationExpr;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithSimpleName;
+import com.github.javaparser.ast.stmt.BlockStmt;
 import com.github.javaparser.ast.stmt.ForEachStmt;
 import com.github.javaparser.ast.type.ClassOrInterfaceType;
 import com.github.javaparser.ast.type.PrimitiveType;
@@ -92,7 +90,7 @@ public class ZipParser {
 
             var allTypes = parsedCode.findAll(TypeDeclaration.class)
                     .stream()
-                    .filter(i-> i.findAncestor(MethodDeclaration.class).isEmpty())
+                    .filter(i-> i.findAncestor(CallableDeclaration.class).isEmpty())
                     .map(t -> (TypeDeclaration<?>) t)
                     .toList();
             for (var type : allTypes) {
@@ -742,13 +740,10 @@ public class ZipParser {
                                     method.getSignature().asString(), http, classPath, methodPath, fullPath,
                                     List.of(), List.of()));
                         }
-
-
                     }
                 }
             }
         }
-
         return returnList;
     }
 
@@ -861,9 +856,12 @@ public class ZipParser {
 
     private List<CallSite> extractMethodCalls(TypeDeclaration<?> type, String declaringTypeName) {
         List<CallSite> returnList = new ArrayList<>();
-        var methods = type.getMethods();
-        for (var method : methods) {
-            var methodBody = method.getBody();
+        List<CallableDeclaration<?>> callables = new ArrayList<>();
+        callables.addAll(type.getMethods());
+        callables.addAll(type.getConstructors());
+
+        for (var method : callables) {
+            var methodBody = getMethodOrConstructorBody(method);
             if (methodBody.isEmpty()) continue;
             var blockStmt = methodBody.get();
 
@@ -995,7 +993,8 @@ public class ZipParser {
         }
         else if(call.methodCallExpr().getScope().isPresent() && call.methodCallExpr().getScope().get().isNameExpr()) {
             var nameExpr = call.methodCallExpr().getScope().get().asNameExpr();
-            var enclosingMethod = nameExpr.findAncestor(MethodDeclaration.class).orElse(null);
+            var enclosingMethod = nameExpr.findAncestor(CallableDeclaration.class)
+                    .map(i-> (CallableDeclaration<?>) i).orElse(null);
 
             if (enclosingMethod != null) {
                 var declarator = enclosingMethod.findAll(VariableDeclarator.class).stream().filter(i ->
@@ -1044,7 +1043,7 @@ public class ZipParser {
                         else if (iterableDeclarator.isEmpty()) {
                             var parameter = enclosingMethod.getParameterByName(ancestorName.getNameAsString());
                             if (parameter.isPresent()) {
-                                elementType = typeArgument(parameter.get().getTypeAsString());
+                                elementType = typeArgument( parameter.get().getTypeAsString());
                             }
                         }
                         if (elementType != null) {
@@ -1248,7 +1247,7 @@ public class ZipParser {
                     .stream()
                     .filter(i-> callings.contains(i.getNameAsString()) &&
                             (i.getScope().isEmpty() || (i.getScope().get().isNameExpr() && i.getScope().get().asNameExpr().getNameAsString().equals("MockMvcRequestBuilders"))) &&
-                            !i.getArguments().isEmpty() && i.getArguments().getFirst().get().isStringLiteralExpr())
+                            !i.getArguments().isEmpty() && i.getArguments().getFirst().isPresent() && i.getArguments().getFirst().get().isStringLiteralExpr())
                     .map(e -> new TestRequestResponse(signature, HttpMethodKind.valueOf(e.getNameAsString().toUpperCase()), e.getArguments().getFirst().get().asStringLiteralExpr().asString()))
                     .toList();
             testRequestResponseList.addAll(methodCallExpr);
@@ -1274,6 +1273,18 @@ public class ZipParser {
             }
         }
         return testKind;
+    }
+
+
+    private Optional<BlockStmt> getMethodOrConstructorBody(CallableDeclaration<?> callable) {
+        if (callable.isMethodDeclaration()) {
+            return callable.asMethodDeclaration().getBody();
+        }
+        else if (callable.isConstructorDeclaration()) {
+            return Optional.ofNullable(callable.asConstructorDeclaration().getBody());
+        } else {
+            return Optional.empty();
+        }
     }
 
     // TODO add liquibase and flyway support
