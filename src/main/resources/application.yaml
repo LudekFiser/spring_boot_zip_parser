@@ -1,3 +1,8 @@
 spring:
   application:
     name: Zip_Project_Parser_Backend
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB

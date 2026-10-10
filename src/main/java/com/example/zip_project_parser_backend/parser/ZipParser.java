@@ -915,9 +915,11 @@ public class ZipParser {
                         for (var variable : field.getVariables()) {
                             if (variable.getNameAsString().equals(scopeName)) {
                                 scopeTypeName = variable.getType().asString();
-
                             }
                         }
+                    }
+                    if (scopeTypeName == null && Character.isUpperCase(scopeName.charAt(0)) && !scopeName.equals("this")) {
+                        scopeTypeName = scopeName;
                     }
                 }
                 var argumentCount = methodCall.getArguments().size();
