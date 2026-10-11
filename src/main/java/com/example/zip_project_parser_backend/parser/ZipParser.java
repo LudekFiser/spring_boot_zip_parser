@@ -906,17 +906,15 @@ public class ZipParser {
                 }
 
                 if (scopeName != null && scopeTypeName == null && !isThis) {
-                    var declarators = blockStmt.findAll(VariableDeclarator.class);
-                    for (var decl : declarators) {
-                        if (decl.getNameAsString().equals(scopeName)) {
-                            foundLocal = true;
-                            if (!decl.getTypeAsString().equals("var")) {
-                                scopeTypeName = decl.getTypeAsString();
-                            } else if (decl.getInitializer().isPresent() &&
-                                    decl.getInitializer().get().isObjectCreationExpr()) {
-                                scopeTypeName = simpleTypeName(decl.getInitializer().get().asObjectCreationExpr().getTypeAsString());
-                            }
-                            break;
+                    var declarator = visibleDeclarator(scopeName, methodCall,  blockStmt);
+                    if (declarator.isPresent()) {
+                        foundLocal = true;
+                        if (!declarator.get().getTypeAsString().equals("var")) {
+                            scopeTypeName = declarator.get().getTypeAsString();
+                        } else if (declarator.get().getInitializer().isPresent() &&
+                                declarator.get().getInitializer().get().isObjectCreationExpr()) {
+                            scopeTypeName = simpleTypeName(declarator.get()
+                                    .getInitializer().get().asObjectCreationExpr().getTypeAsString());
                         }
                     }
                 }
@@ -1023,8 +1021,7 @@ public class ZipParser {
                     .map(i-> (CallableDeclaration<?>) i).orElse(null);
 
             if (enclosingMethod != null) {
-                var declarator = enclosingMethod.findAll(VariableDeclarator.class).stream().filter(i ->
-                        i.getNameAsString().equals(nameExpr.getNameAsString())).findFirst();
+                var declarator = visibleDeclarator(nameExpr.getNameAsString(), call.methodCallExpr(),  enclosingMethod);
                 var initializer = declarator.flatMap(VariableDeclarator::getInitializer);
                 var ancestor = declarator.flatMap(variableDeclarator -> variableDeclarator.findAncestor(ForEachStmt.class));
 
@@ -1054,8 +1051,7 @@ public class ZipParser {
                 else if (declarator.isPresent() && (ancestor.isPresent() && ancestor.get().getVariableDeclarator().equals(declarator.get()))) {
                     if (ancestor.get().getIterable().isNameExpr()) {
                         var ancestorName = ancestor.get().getIterable().asNameExpr();
-                        var iterableDeclarator = enclosingMethod.findAll(VariableDeclarator.class).stream().filter(i ->
-                                Objects.equals(i.getNameAsString(), ancestorName.getNameAsString())).findFirst();
+                        var iterableDeclarator = visibleDeclarator(ancestorName.getNameAsString(), ancestor.get(), enclosingMethod);
 
                         var iterableInitializer = iterableDeclarator.flatMap(VariableDeclarator::getInitializer);
                         String elementType = null;
@@ -1352,6 +1348,16 @@ public class ZipParser {
         } else {
             return Optional.empty();
         }
+    }
+
+    private Optional<VariableDeclarator> visibleDeclarator(String name, Node from, Node body) {
+        return body.findAll(VariableDeclarator.class)
+                .stream()
+                .filter(i->i.getNameAsString().equals(name))
+                .filter(e -> e.findAncestor(BlockStmt.class)
+                        .map(o-> o.isAncestorOf(from)).orElse(false))
+                .filter(u -> u.getBegin().get().isBefore(from.getBegin().get()))
+                .reduce((x, y) -> y);
     }
 
     // TODO add liquibase and flyway support
