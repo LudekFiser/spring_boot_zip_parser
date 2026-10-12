@@ -21,6 +21,7 @@ import com.github.javaparser.ast.type.Type;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -32,9 +33,18 @@ public class ZipParser {
 
     public Map<String, String> uploadAndParseZip(MultipartFile zip) {
 
+        try(var inputStream = zip.getInputStream()){
+            return readResources(inputStream);
+        } catch (IOException e) {
+
+            throw new RuntimeException(e);
+        }
+    }
+
+    public Map<String, String> readResources(InputStream entryInputStream) {
         Map<String, String> classesAndCode = new HashMap<>();
 
-        try(var inputStream = new ZipInputStream(zip.getInputStream())){
+        try(var inputStream = new ZipInputStream(entryInputStream)){
             ZipEntry entry;
             while ((entry = inputStream.getNextEntry()) != null) {
                 if (entry.getName().startsWith("_") || !entry.getName().endsWith(".java")) {
