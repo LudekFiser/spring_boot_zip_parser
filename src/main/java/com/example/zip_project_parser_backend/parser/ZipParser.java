@@ -552,7 +552,6 @@ public class ZipParser {
             if (prefix.contains(".")) prefix = prefix.substring(0, prefix.lastIndexOf("."));
             else break;
         }
-
         var foundImport = imports.stream()
                 .filter(i -> !i.isAsterisk() && !i.isModule() && !i.isStatic())
                 .map(ImportResponse::name)
@@ -569,11 +568,9 @@ public class ZipParser {
                 return name;
             }
         }
-
         if (typesByQualifiedName.containsKey(foundImport)) {
             return foundImport;
         }
-
         var foundImportAsterisk = imports.stream()
                 .filter(i -> i.isAsterisk() && !i.isModule() && !i.isStatic())
                 .map(ImportResponse::name).toList();
@@ -979,21 +976,30 @@ public class ZipParser {
             targetType = resolveProjectTypeName(simpleTypeName(callRsp.scopeType()), packageName, imports,typesByQualifiedName, sourceTypeName);
         }
         else if (callRsp.scope() == null || callRsp.scope().equals("this")) {
-            if (Objects.equals(callRsp.scope(), "this") || typesByQualifiedName.get(callRsp.sourceType()).methodResponseList().stream().anyMatch(i->i.name().equals(callRsp.calledMethodName()))) {
+            if (Objects.equals(callRsp.scope(), "this") || hasMethod(callRsp.sourceType(), callRsp.calledMethodName(), typesByQualifiedName)) {
                 targetType = sourceTypeName;
             } else {
                 String owner = null;
-                String asteriskOwner = null;
+                String projectOwner = null;
+                String libraryOwner = null;
                 for (var staticImport : imports.stream().filter(ImportResponse::isStatic).toList()) {
                     if (staticImport.name().endsWith("." + callRsp.calledMethodName())) {
                         owner = staticImport.name().substring(0, staticImport.name().lastIndexOf("."));
                         break;
                     } else if (staticImport.isAsterisk()) {
-                        asteriskOwner = staticImport.name();
+                        if (hasMethod(staticImport.name(), callRsp.calledMethodName(), typesByQualifiedName)) {
+                            projectOwner = staticImport.name();
+                        }
+                        else if (!typesByQualifiedName.containsKey(staticImport.name())) {
+                            libraryOwner = staticImport.name();
+                        }
                     }
                 }
                 if (owner == null) {
-                    owner = asteriskOwner;
+                    owner = projectOwner;
+                    if (owner == null) {
+                        owner = libraryOwner;
+                    }
                 }
                 if (owner != null) {
                     if (typesByQualifiedName.containsKey(owner)) {
@@ -1165,7 +1171,6 @@ public class ZipParser {
             signature = methodName + "(" + parameterType + ")";
             parameterResponse.add(new ParameterResponse(parameterName, parameterType,List.of(), List.of()));
         }
-
         return new MethodResponse(methodName, signature, returnType, List.of(), parameterResponse, List.of());
     }
 
@@ -1178,13 +1183,11 @@ public class ZipParser {
 
     private String typeArgument(String text) {
         if (text == null) return null;
-
         var firstBrace = text.indexOf("<");
         var lastBrace = text.lastIndexOf(">");
         if (firstBrace == -1 || lastBrace == -1) return null;
         var inside = text.substring(firstBrace+1, lastBrace).trim();
         if (inside.contains(",") || inside.isEmpty()) return null;
-
         return inside;
     }
 
@@ -1226,7 +1229,6 @@ public class ZipParser {
                 return resolveInClassContext(inside, innerResolved.targetType(), importsByQualifiedName, typesByQualifiedName);
             }
         }
-
         if (!sitesByExpr.containsKey(methodCallExpr)) return null;
 
         var callSite = sitesByExpr.get(methodCallExpr);
@@ -1373,6 +1375,11 @@ public class ZipParser {
                         .map(o-> o.isAncestorOf(from)).orElse(false))
                 .filter(u -> u.getBegin().get().isBefore(from.getBegin().get()))
                 .reduce((x, y) -> y);
+    }
+
+    private boolean hasMethod(String typeName, String methodName, Map<String, ClassDetailsResponse> typesByQualifiedName) {
+        if (!typesByQualifiedName.containsKey(typeName)) return false;
+        return typesByQualifiedName.get(typeName).methodResponseList().stream().anyMatch(i->i.name().equals(methodName));
     }
 
     // TODO add liquibase and flyway support
