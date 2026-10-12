@@ -8,6 +8,7 @@ import com.github.javaparser.ast.CompilationUnit;
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.*;
 import com.github.javaparser.ast.expr.AnnotationExpr;
+import com.github.javaparser.ast.expr.BinaryExpr;
 import com.github.javaparser.ast.expr.Expression;
 import com.github.javaparser.ast.expr.MethodCallExpr;
 import com.github.javaparser.ast.nodeTypes.NodeWithName;
@@ -1316,8 +1317,8 @@ public class ZipParser {
                     .stream()
                     .filter(i-> callings.contains(i.getNameAsString()) &&
                             (i.getScope().isEmpty() || (i.getScope().get().isNameExpr() && i.getScope().get().asNameExpr().getNameAsString().equals("MockMvcRequestBuilders"))) &&
-                            !i.getArguments().isEmpty() && i.getArguments().getFirst().isPresent() && i.getArguments().getFirst().get().isStringLiteralExpr())
-                    .map(e -> new TestRequestResponse(signature, HttpMethodKind.valueOf(e.getNameAsString().toUpperCase()), e.getArguments().getFirst().get().asStringLiteralExpr().asString()))
+                            !i.getArguments().isEmpty() && i.getArguments().getFirst().isPresent() && stringValueOf(i.getArguments().getFirst().get(), type) != null)
+                    .map(e -> new TestRequestResponse(signature, HttpMethodKind.valueOf(e.getNameAsString().toUpperCase()), stringValueOf(e.getArguments().getFirst().get(), type)))
                     .toList();
             testRequestResponseList.addAll(methodCallExpr);
         }
@@ -1380,6 +1381,31 @@ public class ZipParser {
     private boolean hasMethod(String typeName, String methodName, Map<String, ClassDetailsResponse> typesByQualifiedName) {
         if (!typesByQualifiedName.containsKey(typeName)) return false;
         return typesByQualifiedName.get(typeName).methodResponseList().stream().anyMatch(i->i.name().equals(methodName));
+    }
+
+    private String stringValueOf(Expression expression, TypeDeclaration<?> type) {
+        if (expression.isStringLiteralExpr()) return expression.asStringLiteralExpr().asString();
+        if (expression.isNameExpr()) {
+            var foundField = type.getFieldByName(expression.asNameExpr().getNameAsString());
+            if (foundField.isPresent()) {
+                var initializer = foundField.get().getVariables()
+                        .stream()
+                        .filter(i-> i.getNameAsString().equals(expression.asNameExpr().getNameAsString())).findFirst()
+                        .flatMap(VariableDeclarator::getInitializer);
+
+                if (initializer.isPresent()) return stringValueOf(initializer.get(), type);
+            }
+        }
+        if (expression.isBinaryExpr()) {
+            if (expression.asBinaryExpr().getOperator().equals(BinaryExpr.Operator.PLUS)) {
+                var left = stringValueOf(expression.asBinaryExpr().getLeft(), type);
+                var right = stringValueOf(expression.asBinaryExpr().getRight(), type);
+                if (left != null && right != null) {
+                    return left + right;
+                }
+            }
+        }
+        return null;
     }
 
     // TODO add liquibase and flyway support
