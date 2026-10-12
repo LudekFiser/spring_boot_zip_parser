@@ -1397,7 +1397,7 @@ public class ZipParser {
             }
         }
         if (expression.isBinaryExpr()) {
-            if (expression.asBinaryExpr().getOperator().equals(BinaryExpr.Operator.PLUS)) {
+            if (expression.asBinaryExpr().getOperator() == BinaryExpr.Operator.PLUS) {
                 var left = stringValueOf(expression.asBinaryExpr().getLeft(), type);
                 var right = stringValueOf(expression.asBinaryExpr().getRight(), type);
                 if (left != null && right != null) {
