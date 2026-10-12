@@ -518,7 +518,7 @@ public class ZipParser {
         List<FieldDependencyResponse> returnList = new ArrayList<>();
         for (var field : sourceType.fieldResponseList()) {
             for (var referencedType : field.referencedTypes()) {
-                var targetType = resolveProjectTypeName(referencedType, sourceType.packageName(), imports, typesByQualifiedName);
+                var targetType = resolveProjectTypeName(referencedType, sourceType.packageName(), imports, typesByQualifiedName, sourceTypeName);
                 if (targetType == null) {
                     continue;
                 }
@@ -536,7 +536,22 @@ public class ZipParser {
     }
 
     private String resolveProjectTypeName(String referencedTypeName, String packageName, List<ImportResponse> imports,
-                                          Map<String, ClassDetailsResponse> typesByQualifiedName) {
+                                          Map<String, ClassDetailsResponse> typesByQualifiedName, String classFullName) {
+        var prefix = classFullName;
+        String packageNameOverwritten;
+        if (packageName == null || packageName.isEmpty()) {
+            packageNameOverwritten = "";
+        } else {
+            packageNameOverwritten = packageName;
+        }
+        while (prefix.length() > packageNameOverwritten.length()) {
+            var candidate = prefix + "." + referencedTypeName;
+            if (typesByQualifiedName.containsKey(candidate)) {
+                return candidate;
+            }
+            if (prefix.contains(".")) prefix = prefix.substring(0, prefix.lastIndexOf("."));
+            else break;
+        }
 
         var foundImport = imports.stream()
                 .filter(i -> !i.isAsterisk() && !i.isModule() && !i.isStatic())
@@ -579,7 +594,7 @@ public class ZipParser {
         for (var method : sourceType.methodResponseList()) {
             for (var methodReferenceType : method.returnReferencedTypes()) {
                 var targetType = resolveProjectTypeName(methodReferenceType, sourceType.packageName(),
-                        imports, typesByQualifiedName);
+                        imports, typesByQualifiedName, sourceTypeName);
                 if (targetType == null) continue;
 
                 returnList.add(new MethodDependencyResponse(sourceTypeName, method.name(),
@@ -590,7 +605,7 @@ public class ZipParser {
             for (var methodParameters : method.parameters()) {
                 for (var parameter : methodParameters.referencedTypes()) {
                     var targetType = resolveProjectTypeName(parameter, sourceType.packageName(),
-                            imports, typesByQualifiedName);
+                            imports, typesByQualifiedName, sourceTypeName);
 
                     if (targetType == null) continue;
 
@@ -611,7 +626,7 @@ public class ZipParser {
             for (var constructorParameters : constructor.parameters()) {
                 for (var parameter : constructorParameters.referencedTypes()) {
                     var targetType = resolveProjectTypeName(parameter, sourceType.packageName(),
-                            imports, typesByQualifiedName);
+                            imports, typesByQualifiedName, sourceTypeName);
 
                     if (targetType == null) continue;
 
@@ -629,13 +644,13 @@ public class ZipParser {
         List<InheritanceDependencyResponse> returnList = new ArrayList<>();
 
         for (var extended : sourceType.inheritanceResponse().extendedTypes()) {
-            var targetType = resolveProjectTypeName(extended.baseType(), sourceType.packageName(), imports, typesByQualifiedName);
+            var targetType = resolveProjectTypeName(extended.baseType(), sourceType.packageName(), imports, typesByQualifiedName, sourceTypeName);
             if (targetType == null) continue;
             returnList.add(new InheritanceDependencyResponse(sourceTypeName, targetType, InheritanceDependencyKind.EXTENDS));
 
         }
         for (var implemented : sourceType.inheritanceResponse().implementedTypes()) {
-            var targetType = resolveProjectTypeName(implemented.baseType(), sourceType.packageName(), imports, typesByQualifiedName);
+            var targetType = resolveProjectTypeName(implemented.baseType(), sourceType.packageName(), imports, typesByQualifiedName, sourceTypeName);
             if (targetType == null) continue;
             returnList.add(new InheritanceDependencyResponse(sourceTypeName, targetType, InheritanceDependencyKind.IMPLEMENTS));
         }
@@ -961,7 +976,7 @@ public class ZipParser {
                 "List", "Set", "Collection", "Map", "Optional", "Iterator", "Entry",
                 "ResponseEntity", "Page", "ArgumentCaptor", "HashMap", "ArrayList", "LinkedHashMap", "AtomicReference");
         if (callRsp.scopeType() != null) {
-            targetType = resolveProjectTypeName(simpleTypeName(callRsp.scopeType()), packageName, imports,typesByQualifiedName);
+            targetType = resolveProjectTypeName(simpleTypeName(callRsp.scopeType()), packageName, imports,typesByQualifiedName, sourceTypeName);
         }
         else if (callRsp.scope() == null || callRsp.scope().equals("this")) {
             if (Objects.equals(callRsp.scope(), "this") || typesByQualifiedName.get(callRsp.sourceType()).methodResponseList().stream().anyMatch(i->i.name().equals(callRsp.calledMethodName()))) {
@@ -1075,7 +1090,7 @@ public class ZipParser {
                             }
                         }
                         if (elementType != null) {
-                            targetType = resolveProjectTypeName(elementType, packageName, imports, typesByQualifiedName);
+                            targetType = resolveProjectTypeName(elementType, packageName, imports, typesByQualifiedName, sourceTypeName);
                         }
                     }
                 }
@@ -1225,7 +1240,7 @@ public class ZipParser {
         else if(methodNames.contains(methodCallExpr.getNameAsString())) {
             var first = methodCallExpr.getArguments().stream().filter(Expression::isClassExpr).findFirst();
             if (first.isPresent()) {
-                return resolveProjectTypeName(simpleTypeName(first.get().asClassExpr().getTypeAsString()), packageName, imports, typesByQualifiedName);
+                return resolveProjectTypeName(simpleTypeName(first.get().asClassExpr().getTypeAsString()), packageName, imports, typesByQualifiedName, sourceTypeName);
             }
         }
         return null;
@@ -1242,7 +1257,7 @@ public class ZipParser {
 
         var foundClass = typesByQualifiedName.get(classFullName);
         var foundImports = importsByQualifiedName.get(classFullName);
-        return resolveProjectTypeName(typeText, foundClass.packageName(), foundImports, typesByQualifiedName);
+        return resolveProjectTypeName(typeText, foundClass.packageName(), foundImports, typesByQualifiedName, classFullName);
     }
 
     private String superClassOf(String classFullName, Map<String, List<ImportResponse>> importsByQualifiedName,
