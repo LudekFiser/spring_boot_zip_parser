@@ -35,6 +35,5 @@ public class GithubParser {
         if (repo.equals(".") || repo.equals("..")) throw new IllegalArgumentException("Invalid repository name");
 
         return new UrlResponse(owner, repo);
-
     }
 }
