@@ -1,6 +1,5 @@
 package com.example.zip_project_parser_backend.github;
 
-import com.example.zip_project_parser_backend.exceptions.GithubRepositoryNotFoundException;
 import com.example.zip_project_parser_backend.exceptions.InvalidGithubUrlException;
 
 import java.net.URI;
