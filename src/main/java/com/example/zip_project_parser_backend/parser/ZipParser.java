@@ -2,6 +2,7 @@ package com.example.zip_project_parser_backend.parser;
 
 import com.example.zip_project_parser_backend.dto.*;
 import com.example.zip_project_parser_backend.enumeration.*;
+import com.example.zip_project_parser_backend.exceptions.ProjectTooLargeException;
 import com.github.javaparser.JavaParser;
 import com.github.javaparser.ParserConfiguration;
 import com.github.javaparser.ast.CompilationUnit;
@@ -22,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.zip.ZipEntry;
@@ -30,12 +32,14 @@ import java.util.zip.ZipInputStream;
 @Service
 public class ZipParser {
 
+    private static final int MAX_JAVA_FILES = 20_000;
+    private static final int MAX_SOURCE_CHARS = 50_000_000;
+
     public Map<String, String> uploadAndParseZip(MultipartFile zip) {
 
         try(var inputStream = zip.getInputStream()){
             return readResources(inputStream);
         } catch (IOException e) {
-
             throw new RuntimeException(e);
         }
     }
@@ -45,18 +49,28 @@ public class ZipParser {
 
         try(var inputStream = new ZipInputStream(entryInputStream)){
             ZipEntry entry;
+            int count;
+            int filesCount = 0;
+            int charsCount = 0;
+            char[] buffer = new char[8192];
             while ((entry = inputStream.getNextEntry()) != null) {
                 if (entry.getName().startsWith("_") || !entry.getName().endsWith(".java")) {
                     continue;
                 }
-                StringBuilder code = new StringBuilder();
-
-                Scanner scanner = new Scanner(inputStream, StandardCharsets.UTF_8);
-                while (scanner.hasNextLine()) {
-                    String line = scanner.nextLine();
-                    code.append(line).append("\n");
+                if (filesCount >= MAX_JAVA_FILES) {
+                    throw new ProjectTooLargeException("The maximum number of files is 20 000! - Yours is currently "+filesCount + " And they may be more!");
                 }
+                filesCount++;
+                StringBuilder code = new StringBuilder();
+                InputStreamReader reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
 
+                while ((count = reader.read(buffer)) != -1) {
+                    if (charsCount + count > MAX_SOURCE_CHARS) {
+                        throw new ProjectTooLargeException("The maximum number of characters is 50 Million! - Yours is currently " + (charsCount + count) + " And they may be more!");
+                    }
+                    charsCount += count;
+                    code.append(buffer, 0 ,count);
+                }
                 classesAndCode.put(entry.getName(), code.toString());
             }
         } catch (IOException e) {

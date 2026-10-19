@@ -25,4 +25,9 @@ public class GlobalExceptionHandler {
     public ProblemDetail githubUnavailable(GithubUnavailableException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(503), e.getMessage());
     }
+
+    @ExceptionHandler(ProjectTooLargeException.class)
+    public ProblemDetail projectTooLarge(ProjectTooLargeException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(413), e.getMessage());
+    }
 }
