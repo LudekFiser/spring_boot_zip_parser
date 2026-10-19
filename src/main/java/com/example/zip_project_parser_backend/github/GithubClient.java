@@ -12,7 +12,7 @@ import org.springframework.web.client.RestClientException;
 public class GithubClient {
 
     private final RestClient restClient;
-    private static final int MAX_ZIP_BYTES = 100_000;//100_000_000;
+    private static final int MAX_ZIP_BYTES = 100_000_000;
 
     public GithubClient(RestClient restClient) {
         this.restClient = restClient;
