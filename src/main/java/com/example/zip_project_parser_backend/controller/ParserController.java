@@ -1,17 +1,14 @@
 package com.example.zip_project_parser_backend.controller;
 
 import com.example.zip_project_parser_backend.dto.ProjectAnalysisResponse;
-import com.example.zip_project_parser_backend.github.GithubClient;
 import com.example.zip_project_parser_backend.github.GithubImportRequest;
-import com.example.zip_project_parser_backend.github.GithubParser;
+import com.example.zip_project_parser_backend.github.GithubImportService;
 import com.example.zip_project_parser_backend.parser.ZipParser;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.ByteArrayInputStream;
 import java.util.Map;
 
 @RestController
@@ -19,11 +16,11 @@ import java.util.Map;
 public class ParserController {
 
     private final ZipParser zipParser;
-    private final GithubClient githubClient;
+    private final GithubImportService githubImportService;
 
-    public ParserController(ZipParser zipParser, GithubClient githubClient) {
+    public ParserController(ZipParser zipParser, GithubImportService githubImportService) {
         this.zipParser = zipParser;
-        this.githubClient = githubClient;
+        this.githubImportService = githubImportService;
     }
 
     @PostMapping
@@ -34,10 +31,8 @@ public class ParserController {
 
     @PostMapping("/github")
     public ResponseEntity<Map<String, String>> uploadAndParseGithubUrl(@RequestBody @Valid GithubImportRequest request) {
-        var parse = GithubParser.parse(request.url());
-        var zip = githubClient.downloadZip(parse.owner(), parse.repo());
-        var read = zipParser.readResources(new ByteArrayInputStream(zip));
-        return ResponseEntity.ok().body(read);
+        var repository = githubImportService.importRepository(request.url());
+        return ResponseEntity.ok().body(repository);
     }
 
     @PostMapping("/class-details")
