@@ -58,7 +58,7 @@ public class ZipParser {
                     continue;
                 }
                 if (filesCount >= MAX_JAVA_FILES) {
-                    throw new ProjectTooLargeException("The maximum number of files is 20 000! - Yours is currently "+filesCount + " And they may be more!");
+                    throw new ProjectTooLargeException("The maximum number of files is %,d!".formatted(MAX_JAVA_FILES));
                 }
                 filesCount++;
                 StringBuilder code = new StringBuilder();
@@ -66,7 +66,7 @@ public class ZipParser {
 
                 while ((count = reader.read(buffer)) != -1) {
                     if (charsCount + count > MAX_SOURCE_CHARS) {
-                        throw new ProjectTooLargeException("The maximum number of characters is 50 Million! - Yours is currently " + (charsCount + count) + " And they may be more!");
+                        throw new ProjectTooLargeException("The maximum number of characters is %,d!".formatted(MAX_SOURCE_CHARS));
                     }
                     charsCount += count;
                     code.append(buffer, 0 ,count);
