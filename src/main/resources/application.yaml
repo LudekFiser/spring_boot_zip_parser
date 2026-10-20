@@ -1,8 +1,22 @@
 spring:
+  config:
+    import: optional:file:.env[.properties]
   application:
     name: Zip_Project_Parser_Backend
+
+
 
   servlet:
     multipart:
       max-file-size: 50MB
       max-request-size: 50MB
+  datasource:
+    url: jdbc:postgresql://localhost:5433/${DB_NAME}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
