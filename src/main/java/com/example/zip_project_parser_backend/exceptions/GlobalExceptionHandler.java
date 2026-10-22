@@ -30,4 +30,9 @@ public class GlobalExceptionHandler {
     public ProblemDetail projectTooLarge(ProjectTooLargeException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(413), e.getMessage());
     }
+
+    @ExceptionHandler(UserNotFoundException.class)
+    public ProblemDetail userNotFound(UserNotFoundException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(401), e.getMessage());
+    }
 }

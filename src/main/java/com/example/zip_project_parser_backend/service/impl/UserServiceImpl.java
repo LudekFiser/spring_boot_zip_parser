@@ -1,6 +1,7 @@
 package com.example.zip_project_parser_backend.service.impl;
 
 import com.example.zip_project_parser_backend.dto.user.UserResponse;
+import com.example.zip_project_parser_backend.exceptions.UserNotFoundException;
 import com.example.zip_project_parser_backend.repository.UserRepository;
 import com.example.zip_project_parser_backend.service.UserService;
 import org.springframework.security.oauth2.core.user.OAuth2User;
@@ -22,7 +23,8 @@ public class UserServiceImpl implements UserService {
         if (id == null) {
             throw new RuntimeException();
         }
-        var existingUser = userRepository.findByGithubId(id.longValue()).orElseThrow();
+        var existingUser = userRepository.findByGithubId(id.longValue())
+                .orElseThrow(() -> new UserNotFoundException("User account not found, sign in again"));
 
         return new UserResponse(existingUser.getGithubUsername(), existingUser.getAvatarUrl());
     }
