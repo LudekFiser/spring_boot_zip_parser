@@ -3,6 +3,9 @@ package com.example.zip_project_parser_backend.entity;
 import com.example.zip_project_parser_backend.dto.ProjectAnalysisResponse;
 import com.example.zip_project_parser_backend.enumeration.Source;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
 import org.hibernate.annotations.*;
 import org.hibernate.type.SqlTypes;
 
@@ -44,6 +47,15 @@ public class Analysis {
     @Column(name = "created_at")
     @CreationTimestamp
     private OffsetDateTime createdAt;
+
+    public Analysis(String githubUrl, @NotBlank String projectName, @NotNull Source source, @NotEmpty Map<@NotNull String, @NotNull String> sourceCode) {
+        this.githubUrl = githubUrl;
+        this.projectName = projectName;
+        this.source = source;
+        this.sourceCode = sourceCode;
+    }
+
+    protected Analysis() {}
 
     public UUID getId() {
         return id;

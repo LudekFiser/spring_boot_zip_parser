@@ -35,4 +35,9 @@ public class GlobalExceptionHandler {
     public ProblemDetail userNotFound(UserNotFoundException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(401), e.getMessage());
     }
+
+    @ExceptionHandler(AnalysisNotFoundException.class)
+    public ProblemDetail analysisNotFound(AnalysisNotFoundException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatusCode.valueOf(401), e.getMessage());
+    }
 }
