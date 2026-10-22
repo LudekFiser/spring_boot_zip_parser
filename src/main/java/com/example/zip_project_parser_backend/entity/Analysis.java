@@ -1,90 +1,105 @@
 package com.example.zip_project_parser_backend.entity;
-@jakarta.persistence.Entity
-@jakarta.persistence.Table(name = "analyses")
+
+import com.example.zip_project_parser_backend.dto.ProjectAnalysisResponse;
+import com.example.zip_project_parser_backend.enumeration.Source;
+import jakarta.persistence.*;
+import org.hibernate.annotations.*;
+import org.hibernate.type.SqlTypes;
+
+import java.time.OffsetDateTime;
+import java.util.Map;
+import java.util.UUID;
+
+@Entity
+@Table(name = "analyses")
 public class Analysis {
-@jakarta.persistence.Id
-@org.hibernate.annotations.ColumnDefault("gen_random_uuid()")
-@jakarta.persistence.Column(name = "id", nullable = false)
-private java.util.UUID id;
+    @Id
+    @Column(name = "id")
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
 
-@jakarta.validation.constraints.NotNull
-@jakarta.persistence.ManyToOne(fetch = jakarta.persistence.FetchType.LAZY, optional = false)
-@org.hibernate.annotations.OnDelete(action = org.hibernate.annotations.OnDeleteAction.CASCADE)
-@jakarta.persistence.JoinColumn(name = "user_id", nullable = false)
-private com.example.zip_project_parser_backend.entity.User user;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @OnDelete(action = OnDeleteAction.CASCADE)
+    @JoinColumn(name = "user_id")
+    private User user;
 
-@jakarta.validation.constraints.NotNull
-@jakarta.persistence.Column(name = "project_name", nullable = false, length = Integer.MAX_VALUE)
-private java.lang.String projectName;
+    @Column(name = "project_name")
+    private String projectName;
 
-@jakarta.validation.constraints.NotNull
-@org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
-@jakarta.persistence.Column(name = "json_analysis", nullable = false)
-private java.util.Map<java.lang.String, java.lang.Object> jsonAnalysis;
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "json_analysis")
+    private ProjectAnalysisResponse jsonAnalysis;
 
-@jakarta.validation.constraints.NotNull
-@org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
-@jakarta.persistence.Column(name = "source_code", nullable = false)
-private java.util.Map<java.lang.String, java.lang.Object> sourceCode;
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "source_code")
+    private Map<String, String> sourceCode;
 
-@jakarta.validation.constraints.NotNull
-@jakarta.persistence.Column(name = "source", nullable = false, length = Integer.MAX_VALUE)
-private java.lang.String source;
+    @Column(name = "source")
+    @Enumerated(EnumType.STRING)
+    private Source source;
 
-@jakarta.persistence.Column(name = "github_url", length = Integer.MAX_VALUE)
-private java.lang.String githubUrl;
+    @Column(name = "github_url")
+    private String githubUrl;
 
-@jakarta.validation.constraints.NotNull
-@org.hibernate.annotations.ColumnDefault("now()")
-@jakarta.persistence.Column(name = "created_at", nullable = false)
-private java.time.OffsetDateTime createdAt;
+    @Column(name = "created_at")
+    @CreationTimestamp
+    private OffsetDateTime createdAt;
 
-public java.util.UUID getId() {
-  return id;
-}public void setId(java.util.UUID id) {
-  this.id = id;
-}
+    public UUID getId() {
+        return id;
+    }
 
-public com.example.zip_project_parser_backend.entity.User getUser() {
-  return user;
-}public void setUser(com.example.zip_project_parser_backend.entity.User user) {
-  this.user = user;
-}
+    public User getUser() {
+        return user;
+    }
 
-public java.lang.String getProjectName() {
-  return projectName;
-}public void setProjectName(java.lang.String projectName) {
-  this.projectName = projectName;
-}
+    public void setUser(User user) {
+        this.user = user;
+    }
 
-public java.util.Map<java.lang.String, java.lang.Object> getJsonAnalysis() {
-  return jsonAnalysis;
-}public void setJsonAnalysis(java.util.Map<java.lang.String, java.lang.Object> jsonAnalysis) {
-  this.jsonAnalysis = jsonAnalysis;
-}
+    public String getProjectName() {
+        return projectName;
+    }
 
-public java.util.Map<java.lang.String, java.lang.Object> getSourceCode() {
-  return sourceCode;
-}public void setSourceCode(java.util.Map<java.lang.String, java.lang.Object> sourceCode) {
-  this.sourceCode = sourceCode;
-}
+    public void setProjectName(String projectName) {
+        this.projectName = projectName;
+    }
 
-public java.lang.String getSource() {
-  return source;
-}public void setSource(java.lang.String source) {
-  this.source = source;
-}
+    public ProjectAnalysisResponse getJsonAnalysis() {
+        return jsonAnalysis;
+    }
 
-public java.lang.String getGithubUrl() {
-  return githubUrl;
-}public void setGithubUrl(java.lang.String githubUrl) {
-  this.githubUrl = githubUrl;
-}
+    public void setJsonAnalysis(ProjectAnalysisResponse jsonAnalysis) {
+        this.jsonAnalysis = jsonAnalysis;
+    }
 
-public java.time.OffsetDateTime getCreatedAt() {
-  return createdAt;
-}public void setCreatedAt(java.time.OffsetDateTime createdAt) {
-  this.createdAt = createdAt;
-}
+    public Map<String, String> getSourceCode() {
+        return sourceCode;
+    }
+
+    public void setSourceCode(Map<String, String> sourceCode) {
+        this.sourceCode = sourceCode;
+    }
+
+    public Source getSource() {
+        return source;
+    }
+
+    public void setSource(Source source) {
+        this.source = source;
+    }
+
+    public String getGithubUrl() {
+        return githubUrl;
+    }
+
+    public void setGithubUrl(String githubUrl) {
+        this.githubUrl = githubUrl;
+    }
+
+    public OffsetDateTime getCreatedAt() {
+        return createdAt;
+    }
+
 
 }
